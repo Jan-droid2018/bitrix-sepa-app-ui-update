@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="de">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width,initial-scale=1"/>
+        <title>SEPA Einstellungen</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com"/>
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+        <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
+        <link rel="stylesheet" href="{{ url_for('static', filename='bitrix24-app.css', v='20260323k') }}"/>
+    </head>
+    <body class="bitrix-app">
+        <div class="page-shell compact-shell">
+            <section class="workspace-shell">
+                <div class="workspace-inner">
+                    <div class="workspace-brand">
+                        <img class="workspace-logo" src="{{ url_for('main.asset_file', filename='Logo_premium-technologies_2021_neg_RGB_1000px.png', v='20260323g') }}" alt="Premium Technologies"/>
+                    </div>
+                    <div class="workspace-head centered-head">
+                        <div>
+                            <h1 class="workspace-title brand-title">SEPA Einstellungen</h1>
+                        </div>
+                    </div>
+                    <div class="workspace-action-row">
+                        <div class="bitrix-tabs centered-tabs">
+                            <a class="bitrix-tab" href="/?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}">Exportzentrum</a>
+                            <span class="bitrix-tab active">Einstellungen</span>
+                        </div>
+                        <div class="hero-actions centered-actions">
+                            <button class="btn btn-primary" type="submit" form="settings-form">Speichern</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="message-stack">
+                {% for msg in error_messages %}
+                    <div class="message error">{{ msg }}</div>
+                {% endfor %}
+                {% for msg in info_messages %}
+                    <div class="message info">{{ msg }}</div>
+                {% endfor %}
+            </div>
+
+            <form id="settings-form" class="stacked-gap compact-stack" method="post" action="/settings">
+                <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
+                <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
+                <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+
+                <section class="panel">
+                    <div class="panel-body stacked-gap">
+                        <div class="section-head compact">
+                            <div>
+                                <h2 class="panel-title">Deal-Felder</h2>
+                            </div>
+                        </div>
+
+                        <div class="grid">
+                            <label class="field-label">
+                                <span>Debitor-Name (optional)</span>
+                                <select class="input" name="field_name">
+                                    <option value="">- auswählen -</option>
+                                    {% for u in deal_uf_codes %}
+                                        <option value="{{ u.code }}" {% if field_name == u.code %}selected{% endif %}>{{ u.label }} ({{ u.code }})</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+                            <label class="field-label">
+                                <span>Mandat-ID</span>
+                                <select class="input" name="field_mand_id">
+                                    <option value="">- auswählen -</option>
+                                    {% for u in deal_uf_codes %}
+                                        <option value="{{ u.code }}" {% if field_mand_id == u.code %}selected{% endif %}>{{ u.label }} ({{ u.code }})</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+                            <label class="field-label">
+                                <span>Mandat-Datum</span>
+                                <select class="input" name="field_mand_date">
+                                    <option value="">- auswählen -</option>
+                                    {% for u in deal_uf_codes %}
+                                        <option value="{{ u.code }}" {% if field_mand_date == u.code %}selected{% endif %}>{{ u.label }} ({{ u.code }})</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+                        </div>
+
+                        <div class="inline-actions">
+                            <a class="btn btn-secondary" href="/debug_detect_mandate_fields?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}">Auto-Erkennung starten</a>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-body stacked-gap">
+                        <div class="section-head compact">
+                            <div>
+                                <h2 class="panel-title">Kontakt</h2>
+                            </div>
+                        </div>
+
+                        <div class="grid">
+                            <label class="field-label">
+                                <span>Kontakt-IBAN</span>
+                                <select class="input" name="field_contact_iban">
+                                    <option value="">- auswählen -</option>
+                                    {% for u in contact_uf_codes %}
+                                        <option value="{{ u.code }}" {% if field_contact_iban == u.code %}selected{% endif %}>{{ u.label }} ({{ u.code }})</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-body stacked-gap">
+                        <div class="section-head compact">
+                            <div>
+                                <h2 class="panel-title">Gläubigerdaten</h2>
+                            </div>
+                        </div>
+
+                        <div class="grid">
+                            <label class="field-label">
+                                <span>Gläubiger</span>
+                                <input class="input" name="creditor_name" value="{{ creditor_name or '' }}" required/>
+                            </label>
+                            <label class="field-label">
+                                <span>Gläubiger-IBAN</span>
+                                <input class="input" name="creditor_iban" value="{{ creditor_iban or '' }}" required/>
+                            </label>
+                            <label class="field-label">
+                                <span>Gläubiger-BIC</span>
+                                <input class="input" name="creditor_bic" value="{{ creditor_bic or '' }}" required/>
+                            </label>
+                            <label class="field-label">
+                                <span>Creditor Identifier (CI)</span>
+                                <input class="input" name="creditor_ci" value="{{ creditor_ci or '' }}" required/>
+                            </label>
+                        </div>
+                    </div>
+                </section>
+            </form>
+        </div>
+
+        <script src="https://api.bitrix24.com/api/v1/"></script>
+        <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260323e') }}"></script>
+    </body>
+</html>

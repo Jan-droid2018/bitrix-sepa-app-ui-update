@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="de">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width,initial-scale=1"/>
+        <title>SEPA Lastschrift - pain.008</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com"/>
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+        <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
+        <link rel="stylesheet" href="{{ url_for('static', filename='bitrix24-app.css', v='20260323k') }}"/>
+    </head>
+    <body class="bitrix-app">
+        <div class="page-shell">
+            <section class="workspace-shell">
+                <div class="workspace-inner">
+                    <div class="workspace-brand">
+                        <img class="workspace-logo" src="{{ url_for('main.asset_file', filename='Logo_premium-technologies_2021_neg_RGB_1000px.png', v='20260323g') }}" alt="Premium Technologies"/>
+                    </div>
+                    <div class="workspace-head centered-head">
+                        <div>
+                            <h1 class="workspace-title brand-title">SEPA Lastschrift Export</h1>
+                        </div>
+                    </div>
+                    <div class="bitrix-tabs centered-tabs">
+                        <span class="bitrix-tab active">Exportzentrum</span>
+                        <a class="bitrix-tab" href="/settings?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}">Einstellungen</a>
+                    </div>
+                </div>
+            </section>
+
+            <div class="message-stack">
+                {% for msg in error_messages %}
+                    <div class="message error">{{ msg }}</div>
+                {% endfor %}
+                {% for msg in info_messages %}
+                    <div class="message info">{{ msg }}</div>
+                {% endfor %}
+            </div>
+
+            <section class="panel">
+                <div class="panel-body stacked-gap">
+                    <div class="section-head compact">
+                        <div>
+                            <h2 class="panel-title">Deal-Auswahl</h2>
+                        </div>
+                    </div>
+
+                    <form method="get" action="/">
+                        <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
+                        <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
+                        <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+                        <input type="hidden" name="page" value="1"/>
+                        <div class="grid">
+                            <label class="field-label">Pipeline
+                                <select class="input" name="category_id">
+                                    <option value="">- wählen -</option>
+                                    {% for c in categories %}
+                                        <option value="{{ c.ID }}" {% if selected_category_id is not none and (c.ID|string) == (selected_category_id|string) %}selected{% endif %}>{{ c.NAME }} (ID {{ c.ID }})</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+                            <label class="field-label">Stage ID
+                                <input class="input" name="stage_id" value="{{ stage_id or '' }}" placeholder="Optional"/>
+                            </label>
+                            <label class="field-label">Deals pro Seite
+                                <select class="input" name="page_size">
+                                    {% for size in page_size_options %}
+                                        <option value="{{ size }}" {% if size == page_size %}selected{% endif %}>{{ size }}</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+                        </div>
+                        <div class="inline-actions" style="margin-top:14px;">
+                            <button class="btn btn-primary" type="submit">Deals laden</button>
+                        </div>
+                    </form>
+
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <div class="metric-label">Seite</div>
+                                <div class="metric-value">{{ page }}</div>
+                            </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Geladene Deals</div>
+                            <div class="metric-value">{{ loaded_deals }}</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-label">Pipeline-Status</div>
+                                <div class="metric-value compact-value">{% if selected_category_id is none and not stage_id %}Nicht aktiv{% else %}Aktiv{% endif %}</div>
+                                <div class="metric-note">{% if selected_category_id is none and not stage_id %}Bitte Pipeline wählen{% else %}Filter aktiv{% endif %}</div>
+                            </div>
+                        </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-body tight">
+                    <div class="inline-tools">
+                        <label class="toolbar-search">
+                            <span>Suche</span>
+                            <input class="input" id="searchBox" placeholder="Titel / Name / IBAN / Mandat"/>
+                        </label>
+                        <label class="toggle-chip"><input type="checkbox" id="fltEur" checked/> nur EUR</label>
+                        <label class="toggle-chip"><input type="checkbox" id="fltPos" checked/> Betrag &gt; 0</label>
+                        <span class="small" id="rowInfo"></span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-body stacked-gap">
+                    <div class="section-head">
+                        <div>
+                            <h2 class="panel-title">SEPA XML</h2>
+                        </div>
+                    </div>
+
+                    <form method="post" action="/export">
+                        <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
+                        <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
+                        <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+                        <input type="hidden" name="category_id" value="{{ selected_category_id if selected_category_id is not none else '' }}"/>
+                        <input type="hidden" name="stage_id" value="{{ stage_id or '' }}"/>
+                        <input type="hidden" name="page" value="{{ page }}"/>
+                        <input type="hidden" name="page_size" value="{{ page_size }}"/>
+
+                        <div class="grid" style="margin-bottom:14px;">
+                            <label class="field-label">Einzugsdatum
+                                <input class="input" type="date" name="exec_date" value="{{ today }}"/>
+                            </label>
+                            <label class="field-label">Instrument
+                                <select class="input" name="lcl_instr">
+                                    <option value="CORE" {% if form_lcl_instr != 'B2B' %}selected{% endif %}>CORE</option>
+                                    <option value="B2B" {% if form_lcl_instr == 'B2B' %}selected{% endif %}>B2B</option>
+                                </select>
+                            </label>
+                            <label class="field-label">Sequenz
+                                <select class="input" name="seq">
+                                    <option value="OOFF" {% if form_seq == 'OOFF' or not form_seq %}selected{% endif %}>OOFF</option>
+                                    <option value="FRST" {% if form_seq == 'FRST' %}selected{% endif %}>FRST</option>
+                                    <option value="RCUR" {% if form_seq == 'RCUR' %}selected{% endif %}>RCUR</option>
+                                    <option value="FNAL" {% if form_seq == 'FNAL' %}selected{% endif %}>FNAL</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        <div class="inline-actions" style="margin-bottom:14px;">
+                            <button class="btn btn-primary" type="submit" {% if not deals %}disabled{% endif %}>SEPA XML erzeugen</button>
+                        </div>
+
+                        <div class="table-wrap">
+                            <table id="dealTable">
+                                <thead>
+                                    <tr>
+                                        <th><input type="checkbox" id="checkAll"/></th>
+                                        <th>ID</th>
+                                        <th>Titel</th>
+                                        <th class="num">Betrag</th>
+                                        <th>Währung</th>
+                                        <th>Debitor-Name</th>
+                                        <th>Debitor-IBAN</th>
+                                        <th>Mandat-ID</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for d in deals %}
+                                        {% set dm = debtor_map.get(d.ID|string) if debtor_map else None %}
+                                        <tr data-amount="{{ d.OPPORTUNITY|float }}" data-currency="{{ d.CURRENCY_ID|e }}">
+                                            <td><input type="checkbox" name="deal_id" value="{{ d.ID }}"/></td>
+                                            <td>{{ d.ID }}</td>
+                                            <td>{{ d.TITLE }}</td>
+                                            <td class="num">{{ '%.2f'|format(d.OPPORTUNITY|float) }}</td>
+                                            <td>{{ d.CURRENCY_ID }}</td>
+                                            <td>{{ (dm and dm.contact_name) or (dm and dm.company_title) or (debtor_name_field and d.get(debtor_name_field)) or d.TITLE }}</td>
+                                            <td>{{ (dm and dm.iban) or '' }}</td>
+                                            <td>{{ mandate_id_field and d.get(mandate_id_field) or '' }}</td>
+                                            <td>
+                                                {% if not mandate_id_field %}
+                                                    <span class="pill">Mandatsfeld fehlt</span>
+                                                {% elif not (mandate_id_field and d.get(mandate_id_field)) %}
+                                                    <span class="pill">Mandats-ID fehlt</span>
+                                                {% elif not (dm and dm.iban) %}
+                                                    <span class="pill">IBAN fehlt</span>
+                                                {% elif dm and dm.iban and not (dm.iban|upper|replace(' ', '')|regex_match('^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$')) %}
+                                                    <span class="pill">IBAN-Format unklar</span>
+                                                {% else %}
+                                                    <span class="ok-pill">Bereit</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            {% if not deals %}
+                                <div class="empty">
+                                    {% if selected_category_id is not none or stage_id %}
+                                        Keine Deals für die aktuelle Auswahl gefunden.
+                                    {% else %}
+                                        Bitte zuerst eine Pipeline wählen.
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                    </form>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-body tight">
+                    <div class="pager">
+                        <form class="inline-form" method="get" action="/">
+                            <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
+                            <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
+                            <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+                            <input type="hidden" name="category_id" value="{{ selected_category_id if selected_category_id is not none else '' }}"/>
+                            <input type="hidden" name="stage_id" value="{{ stage_id or '' }}"/>
+                            <input type="hidden" name="page_size" value="{{ page_size }}"/>
+                            <button class="btn btn-secondary btn-icon" type="submit" name="page" value="{{ page - 1 }}" {% if not has_prev %}disabled{% endif %} aria-label="Vorherige Seite">&#8249;</button>
+                        </form>
+                        <span class="page-indicator">Seite {{ page }}</span>
+                        <form class="inline-form" method="get" action="/">
+                            <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
+                            <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
+                            <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+                            <input type="hidden" name="category_id" value="{{ selected_category_id if selected_category_id is not none else '' }}"/>
+                            <input type="hidden" name="stage_id" value="{{ stage_id or '' }}"/>
+                            <input type="hidden" name="page_size" value="{{ page_size }}"/>
+                            <button class="btn btn-secondary btn-icon" type="submit" name="page" value="{{ page + 1 }}" {% if not has_next %}disabled{% endif %} aria-label="Nächste Seite">&#8250;</button>
+                        </form>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <script src="https://api.bitrix24.com/api/v1/"></script>
+        <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260323e') }}"></script>
+        <script>
+        (function(){
+            const table = document.getElementById("dealTable");
+            const tbody = table ? table.querySelector("tbody") : null;
+            const rows = tbody ? Array.from(tbody.querySelectorAll("tr")) : [];
+            const searchBox = document.getElementById("searchBox");
+            const fltEur = document.getElementById("fltEur");
+            const fltPos = document.getElementById("fltPos");
+            const rowInfo = document.getElementById("rowInfo");
+            const checkAll = document.getElementById("checkAll");
+
+            function matchesFilters(tr){
+                const q = (searchBox.value || "").toLowerCase().trim();
+                const txt = tr.textContent.toLowerCase();
+                if(q && !txt.includes(q)) return false;
+
+                const currency = (tr.getAttribute("data-currency") || "").toUpperCase();
+                const amount = parseFloat(tr.getAttribute("data-amount") || "0") || 0;
+
+                if(fltEur.checked && currency !== "EUR") return false;
+                if(fltPos.checked && !(amount > 0)) return false;
+                return true;
+            }
+
+            function visibleRows(){
+                return rows.filter(matchesFilters);
+            }
+
+            function syncCheckState(){
+                const visible = visibleRows();
+                const checked = visible.filter((row) => {
+                    const cb = row.querySelector('input[type="checkbox"][name="deal_id"]');
+                    return cb && cb.checked;
+                });
+
+                checkAll.checked = visible.length > 0 && checked.length === visible.length;
+                checkAll.indeterminate = checked.length > 0 && checked.length < visible.length;
+            }
+
+            function apply(){
+                const visible = visibleRows();
+                rows.forEach((row) => {
+                    row.style.display = matchesFilters(row) ? "" : "none";
+                });
+                rowInfo.textContent = `${visible.length} von ${rows.length} Deals sichtbar`;
+                checkAll.disabled = visible.length === 0;
+                syncCheckState();
+            }
+
+            searchBox.addEventListener("input", apply);
+            fltEur.addEventListener("change", apply);
+            fltPos.addEventListener("change", apply);
+            checkAll.addEventListener("change", () => {
+                visibleRows().forEach((row) => {
+                    const cb = row.querySelector('input[type="checkbox"][name="deal_id"]');
+                    if(cb) cb.checked = checkAll.checked;
+                });
+                syncCheckState();
+            });
+            rows.forEach((row) => {
+                const cb = row.querySelector('input[type="checkbox"][name="deal_id"]');
+                if(cb) cb.addEventListener("change", syncCheckState);
+            });
+
+            apply();
+        })();
+        </script>
+    </body>
+</html>
