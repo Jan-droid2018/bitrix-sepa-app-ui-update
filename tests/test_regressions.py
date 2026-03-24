@@ -11,9 +11,34 @@ os.environ.setdefault("BITRIX_CLIENT_ID", "test-client")
 os.environ.setdefault("BITRIX_CLIENT_SECRET", "test-secret")
 
 from app import create_app
+from app.config.app_options import app_opt_get, app_opt_set
 from app.domain.userfields import list_deals_page
 from app.services.bitrix_helper import b24_call_raw
 from app.services.export import PAIN_008_NS, build_pain008_xml
+
+
+class AppOptionsTests(unittest.TestCase):
+    def test_app_opt_set_uses_options_payload(self):
+        with patch("app.config.app_options.b24_call") as mocked_call:
+            app_opt_set("example.bitrix24.de", "token-1", "CREDITOR_NAME", "Portal Creditor")
+
+        mocked_call.assert_called_once_with(
+            "example.bitrix24.de",
+            "token-1",
+            "app.option.set",
+            {"options": {"SEPA_SDD_CREDITOR_NAME": "Portal Creditor"}},
+        )
+
+    def test_app_opt_get_handles_legacy_option_value_shape(self):
+        legacy_payload = {
+            "option": "SEPA_SDD_CREDITOR_NAME",
+            "value": "Portal Creditor",
+        }
+
+        with patch("app.config.app_options.b24_call", return_value=legacy_payload):
+            result = app_opt_get("example.bitrix24.de", "token-1", "CREDITOR_NAME")
+
+        self.assertEqual(result, "Portal Creditor")
 
 
 class ExportTests(unittest.TestCase):
