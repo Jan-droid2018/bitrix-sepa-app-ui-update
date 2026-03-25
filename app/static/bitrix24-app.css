@@ -578,6 +578,77 @@ textarea.input:focus {
     background: var(--bx-red);
 }
 
+body.bitrix-app.is-busy {
+    overflow: hidden;
+}
+
+.progress-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(70, 70, 70, 0.24);
+    backdrop-filter: blur(5px);
+}
+
+.progress-overlay[hidden] {
+    display: none;
+}
+
+.progress-card {
+    width: min(460px, calc(100vw - 32px));
+    padding: 22px 22px 18px;
+    border: 1px solid rgba(2, 128, 4, 0.18);
+    border-radius: var(--bx-radius-lg);
+    background: linear-gradient(180deg, #ffffff 0%, #f5faf5 100%);
+    box-shadow: 0 24px 48px rgba(70, 70, 70, 0.18);
+}
+
+.progress-title {
+    margin: 0 0 8px;
+    color: var(--bx-text-strong);
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.progress-copy {
+    margin: 0 0 14px;
+    color: var(--bx-text);
+    line-height: 1.5;
+}
+
+.progress-bar {
+    position: relative;
+    overflow: hidden;
+    height: 12px;
+    border-radius: 999px;
+    background: #e3ece3;
+    box-shadow: inset 0 1px 2px rgba(70, 70, 70, 0.08);
+}
+
+.progress-bar-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 42%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(4, 156, 6, 0.2) 0%, var(--bx-blue) 38%, var(--bx-blue-strong) 100%);
+    animation: progress-slide 1.35s ease-in-out infinite;
+    box-shadow: 0 0 14px rgba(2, 128, 4, 0.28);
+}
+
+@keyframes progress-slide {
+    0% {
+        transform: translateX(-120%);
+    }
+
+    100% {
+        transform: translateX(250%);
+    }
+}
+
 .toggle-chip {
     display: inline-flex;
     align-items: center;

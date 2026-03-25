@@ -42,6 +42,16 @@
                 {% endfor %}
             </div>
 
+            <div id="auto-detect-progress" class="progress-overlay" hidden aria-hidden="true">
+                <div class="progress-card" role="status" aria-live="polite">
+                    <div class="progress-title">Auto-Erkennung läuft</div>
+                    <div class="progress-copy">Vorhandene Felder werden gesucht und fehlende Felder bei Bedarf angelegt.</div>
+                    <div class="progress-bar" aria-hidden="true">
+                        <div class="progress-bar-fill"></div>
+                    </div>
+                </div>
+            </div>
+
             <form id="settings-form" class="stacked-gap compact-stack" method="post" action="/settings">
                 <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
                 <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
@@ -86,7 +96,7 @@
                         </div>
 
                         <div class="inline-actions">
-                            <button class="btn btn-primary" type="submit" form="settings-form" formaction="/debug_detect_mandate_fields" formmethod="post" formnovalidate>Auto-Erkennung &amp; Felder anlegen</button>
+                            <button id="auto-detect-button" class="btn btn-primary" type="submit" form="settings-form" formaction="/debug_detect_mandate_fields" formmethod="post" formnovalidate>Auto-Erkennung &amp; Felder anlegen</button>
                         </div>
                     </div>
                 </section>
@@ -146,5 +156,35 @@
 
         <script src="https://api.bitrix24.com/api/v1/"></script>
         <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260323e') }}"></script>
+        <script>
+            (function () {
+                var form = document.getElementById("settings-form");
+                var progress = document.getElementById("auto-detect-progress");
+                var autoDetectButton = document.getElementById("auto-detect-button");
+
+                if (!form || !progress || !autoDetectButton) {
+                    return;
+                }
+
+                form.addEventListener("submit", function (event) {
+                    var submitter = event.submitter || document.activeElement;
+                    if (!submitter) {
+                        return;
+                    }
+
+                    var action = submitter.getAttribute("formaction") || form.getAttribute("action") || "";
+                    if (!action || action.indexOf("/debug_detect_mandate_fields") === -1) {
+                        return;
+                    }
+
+                    progress.hidden = false;
+                    progress.setAttribute("aria-hidden", "false");
+                    document.body.classList.add("is-busy");
+                    form.setAttribute("aria-busy", "true");
+                    submitter.disabled = true;
+                    submitter.textContent = "Auto-Erkennung läuft...";
+                });
+            })();
+        </script>
     </body>
 </html>
