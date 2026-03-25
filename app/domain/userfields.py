@@ -1,6 +1,45 @@
 import unicodedata
 
-from app.services.bitrix_helper import b24_batch, b24_call_raw, b24_list_all, _chunk
+from app.services.bitrix_helper import b24_batch, b24_call, b24_call_raw, b24_list_all, _chunk
+
+SEPA_USERFIELD_SPECS = {
+    "DEBTOR_NAME": {
+        "scope": "deal",
+        "method": "crm.deal.userfield.add",
+        "field_name": "SEPA_DEBTOR",
+        "xml_id": "SEPA_DEBTOR",
+        "label": "SEPA Debitor-Name",
+        "user_type_id": "string",
+        "help": "Automatisch von der SEPA-App angelegt.",
+    },
+    "MANDATE_ID": {
+        "scope": "deal",
+        "method": "crm.deal.userfield.add",
+        "field_name": "SEPA_MANDATE_ID",
+        "xml_id": "SEPA_MANDATE_ID",
+        "label": "SEPA Mandats-ID",
+        "user_type_id": "string",
+        "help": "Automatisch von der SEPA-App angelegt.",
+    },
+    "MANDATE_DATE": {
+        "scope": "deal",
+        "method": "crm.deal.userfield.add",
+        "field_name": "SEPA_MANDATE_DATE",
+        "xml_id": "SEPA_MANDATE_DATE",
+        "label": "SEPA Mandatsdatum",
+        "user_type_id": "date",
+        "help": "Automatisch von der SEPA-App angelegt.",
+    },
+    "CONTACT_IBAN": {
+        "scope": "contact",
+        "method": "crm.contact.userfield.add",
+        "field_name": "SEPA_IBAN",
+        "xml_id": "SEPA_IBAN",
+        "label": "SEPA IBAN",
+        "user_type_id": "string",
+        "help": "Automatisch von der SEPA-App angelegt.",
+    },
+}
 
 # =========================
 # Userfields / Deals
@@ -44,6 +83,63 @@ def list_contact_userfields(domain: str, access_token: str) -> list[dict]:
         full = out_map.get(fid)
         out.append(full or uf)
     return out
+
+
+def _spec_for(logical_name: str) -> dict:
+    try:
+        return SEPA_USERFIELD_SPECS[logical_name]
+    except KeyError as exc:
+        raise KeyError(f"Unbekannte SEPA-Felddefinition: {logical_name}") from exc
+
+
+def _norm_token(value) -> str:
+    return str(value or "").strip().upper()
+
+
+def find_userfield_by_spec(userfields: list[dict], logical_name: str) -> dict | None:
+    spec = _spec_for(logical_name)
+    expected_field = _norm_token(spec["field_name"])
+    expected_code = _norm_token(f"UF_CRM_{spec['field_name']}")
+    expected_xml_id = _norm_token(spec["xml_id"])
+
+    for userfield in userfields or []:
+        field_name = _norm_token(userfield.get("FIELD_NAME"))
+        xml_id = _norm_token(userfield.get("XML_ID"))
+        if field_name in (expected_field, expected_code) or xml_id == expected_xml_id:
+            return userfield
+    return None
+
+
+def ensure_sepa_userfield(domain: str, access_token: str, logical_name: str, userfields: list[dict] | None = None):
+    spec = _spec_for(logical_name)
+    current_userfields = list(userfields or [])
+
+    existing = find_userfield_by_spec(current_userfields, logical_name)
+    if existing:
+        return existing, False, current_userfields
+
+    fields_payload = {
+        "FIELD_NAME": spec["field_name"],
+        "XML_ID": spec["xml_id"],
+        "USER_TYPE_ID": spec["user_type_id"],
+        "EDIT_FORM_LABEL": spec["label"],
+        "LIST_COLUMN_LABEL": spec["label"],
+        "LIST_FILTER_LABEL": spec["label"],
+        "HELP_MESSAGE": spec["help"],
+        "MULTIPLE": "N",
+        "MANDATORY": "N",
+        "SHOW_FILTER": "Y",
+    }
+
+    b24_call(domain, access_token, spec["method"], {"fields": fields_payload})
+
+    if spec["scope"] == "contact":
+        refreshed = list_contact_userfields(domain, access_token) or []
+    else:
+        refreshed = get_deal_userfields(domain, access_token) or []
+
+    created = find_userfield_by_spec(refreshed, logical_name)
+    return created, True, refreshed
 
 
 def get_deals_by_ids(domain: str, access_token: str, ids: list[str]):
@@ -123,19 +219,126 @@ def _norm(s: str) -> str:
         return ""
     s = unicodedata.normalize("NFKD", s)
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    return s.lower().strip()
+    normalized = []
+    last_was_space = False
+    for ch in s.lower():
+        if ch.isalnum():
+            normalized.append(ch)
+            last_was_space = False
+        else:
+            if not last_was_space:
+                normalized.append(" ")
+            last_was_space = True
+    return "".join(normalized).strip()
+
+
+def _compact_norm(s: str) -> str:
+    return "".join(ch for ch in _norm(s) if ch.isalnum())
+
+
+def _contains_needle(text: str, needle: str) -> bool:
+    normalized_text = _norm(text)
+    normalized_needle = _norm(needle)
+    if not normalized_text or not normalized_needle:
+        return False
+    if normalized_needle in normalized_text:
+        return True
+
+    compact_text = _compact_norm(text)
+    compact_needle = _compact_norm(needle)
+    return bool(compact_needle and compact_needle in compact_text)
 
 
 def _any_contains(text: str, needles: list[str]) -> bool:
-    t = _norm(text)
-    return any(n in t for n in needles)
+    return any(_contains_needle(text, needle) for needle in needles)
 
 
 FIELD_MATCHERS = {
-    "DEBTOR_NAME": ["kontoinhaber", "kontoinhab", "zahler", "debitor", "debtor", "name des zahlers", "zahlungspflicht"],
-    "MANDATE_ID": ["mandat", "mandatsref", "mandatsreferenz", "mandate id", "sepa ref", "sepa-referenz"],
-    "MANDATE_DATE": ["mandatsdatum", "datum mand", "datum der unterschrift", "signature date", "unterschriftsdatum",
-                     "dt of sgntr"],
+    "DEBTOR_NAME": {
+        "aliases": [
+            "debitor",
+            "debtor",
+            "debtor name",
+            "zahler",
+            "zahlername",
+            "name des zahlers",
+            "zahlungspflichtiger",
+            "zahlungspflichtige",
+            "name des zahlungspflichtigen",
+            "kontoinhaber",
+            "kontoinhab",
+            "kontoinhaber",
+            "account holder",
+            "payer",
+            "payer name",
+            "schuldner",
+            "kunde",
+            "kundenname",
+        ],
+        "allowed_types": ("string", "text"),
+        "preferred_types": ("string", "text"),
+        "blocked_terms": ("iban", "bic", "mandat", "referenz", "datum", "date"),
+        "min_score": 7,
+    },
+    "MANDATE_ID": {
+        "aliases": [
+            "mandat id",
+            "mandats id",
+            "mandats-id",
+            "mandatsnummer",
+            "mandat nummer",
+            "mandats nr",
+            "mandatsnr",
+            "mandate id",
+            "mandate identifier",
+            "mandate reference",
+            "mandate ref",
+            "mandatsreferenz",
+            "mandats referenz",
+            "mandatsreference",
+            "mandatsreferens",
+            "mandats referens",
+            "mandatsreferenznummer",
+            "mandatsreferensnummer",
+            "sepa mandat",
+            "sepa mandate",
+            "sepa referenz",
+            "sepa reference",
+            "sepa ref",
+            "reference mandate",
+            "referenz mandate",
+        ],
+        "allowed_types": ("string", "text"),
+        "preferred_types": ("string", "text"),
+        "blocked_terms": ("datum", "date", "signed", "signature", "iban", "bic"),
+        "min_score": 8,
+    },
+    "MANDATE_DATE": {
+        "aliases": [
+            "mandatsdatum",
+            "mandat datum",
+            "mandate date",
+            "mandate signed on",
+            "mandate signed at",
+            "datum mandat",
+            "datum des mandates",
+            "datum der unterschrift",
+            "unterschriftsdatum",
+            "unterzeichnet am",
+            "unterzeichnung am",
+            "signaturdatum",
+            "signature date",
+            "date of signature",
+            "signed on",
+            "signed at",
+            "signing date",
+            "dt of sgntr",
+        ],
+        "allowed_types": ("date", "datetime", "string", "text"),
+        "preferred_types": ("date", "datetime"),
+        "blocked_terms": ("iban", "bic", "referenznummer", "referenz nr", "mandatsreferenz", "mandatsreferens"),
+        "min_score": 8,
+    },
 }
 
 
@@ -151,10 +354,80 @@ def label_candidates(uf: dict) -> list[str]:
     return [label for label in labels if label]
 
 
+def detect_logical_userfield(userfields: list[dict], logical_name: str) -> str | None:
+    matcher = FIELD_MATCHERS.get(logical_name) or {}
+    aliases = matcher.get("aliases") or []
+    allowed_types = tuple(matcher.get("allowed_types") or ())
+    preferred_types = tuple(matcher.get("preferred_types") or ())
+    blocked_terms = tuple(matcher.get("blocked_terms") or ())
+    min_score = int(matcher.get("min_score") or 1)
+
+    best_code = None
+    best_score = 0
+
+    for uf in userfields or []:
+        code = (uf.get("FIELD_NAME") or "").strip()
+        user_type = (uf.get("USER_TYPE_ID") or "").strip().lower()
+        if not code.startswith("UF_CRM_"):
+            continue
+        if allowed_types and user_type not in allowed_types:
+            continue
+
+        labels = label_candidates(uf)
+        score = 0
+
+        for label in labels:
+            label_score = 0
+            normalized_label = _norm(label)
+            compact_label = _compact_norm(label)
+
+            for alias in aliases:
+                if _contains_needle(label, alias):
+                    normalized_alias = _norm(alias)
+                    compact_alias = _compact_norm(alias)
+                    label_score = max(label_score, 8)
+                    if normalized_label == normalized_alias or compact_label == compact_alias:
+                        label_score = max(label_score, 14)
+                    elif compact_alias and compact_alias in compact_label:
+                        label_score = max(label_score, 10)
+
+            for blocked in blocked_terms:
+                if _contains_needle(label, blocked):
+                    label_score -= 6
+
+            score = max(score, label_score)
+
+        if user_type in preferred_types:
+            score += 3
+
+        if logical_name == "MANDATE_DATE" and user_type == "date":
+            score += 3
+        elif logical_name == "MANDATE_DATE" and user_type == "datetime":
+            score += 2
+
+        if score > best_score:
+            best_score = score
+            best_code = code
+
+    return best_code if best_score >= min_score else None
+
+
 def detect_iban_userfield(userfields):
+    iban_aliases = [
+        "iban",
+        "konto iban",
+        "bankverbindung",
+        "kontoverbindung",
+        "bankkonto",
+        "bankdaten",
+        "iban kontakt",
+        "kontakt iban",
+        "konto des zahlers",
+    ]
+
     for uf in userfields or []:
         labels = label_candidates(uf)
-        if any(_any_contains(label, ["iban", "bankverbindung", "konto iban"]) for label in labels):
+        if any(_any_contains(label, iban_aliases) for label in labels):
             code = uf.get("FIELD_NAME") or ""
             if code.startswith("UF_CRM_"):
                 return code

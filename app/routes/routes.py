@@ -9,8 +9,11 @@ from flask import Blueprint, jsonify, redirect, render_template, request, send_f
 
 from app.config.app_options import app_opt_get, app_opt_set
 from app.domain.categories import _parse_category_id, list_categories
-from app.domain.fields import resolve_field_codes
+from app.domain.fields import resolve_field_codes, scan_field_codes
 from app.domain.userfields import (
+    SEPA_USERFIELD_SPECS,
+    ensure_sepa_userfield,
+    find_userfield_by_spec,
     get_deal_userfields,
     get_deals_by_ids,
     list_contact_userfields,
@@ -42,6 +45,16 @@ ALLOWED_LCL_INSTR = {"CORE", "B2B"}
 ALLOWED_SEQ = {"OOFF", "FRST", "RCUR", "FNAL"}
 PAGE_SIZE_OPTIONS = (10, 25, 50, 100)
 ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
+FIELD_OPTION_NAMES = {
+    "DEBTOR_NAME": "FIELD_DEBTOR_NAME",
+    "MANDATE_ID": "FIELD_MANDATE_ID",
+    "MANDATE_DATE": "FIELD_MANDATE_DATE",
+    "CONTACT_IBAN": "FIELD_CONTACT_IBAN",
+}
+USERFIELD_SCOPE_LABELS = {
+    "contact": "Kontakte",
+    "deal": "Aufträge",
+}
 
 
 def _today_str() -> str:
@@ -154,6 +167,251 @@ def _field_option_list(userfields: list[dict]) -> list[dict]:
 
 def _get_creditor_option(domain: str, token: str, name: str) -> str:
     return (app_opt_get(domain, token, name) or "").strip()
+
+
+def _load_saved_field_options(domain: str, token: str) -> dict:
+    return {
+        logical_name: (app_opt_get(domain, token, option_name) or "").strip()
+        for logical_name, option_name in FIELD_OPTION_NAMES.items()
+    }
+
+def _append_scope_feedback_messages(messages: list[str], prefix: str, logical_names: list[str]):
+    for scope in ("deal", "contact"):
+        labels = [
+            SEPA_USERFIELD_SPECS[name]["label"]
+            for name in logical_names
+            if SEPA_USERFIELD_SPECS[name]["scope"] == scope
+        ]
+        if labels:
+            messages.append(f"{prefix} {USERFIELD_SCOPE_LABELS[scope]}: {', '.join(labels)}.")
+
+
+def _requested_field_options(saved_options: dict) -> dict:
+    if request.method != "POST":
+        return dict(saved_options)
+
+    return {
+        "DEBTOR_NAME": (request.form.get("field_name") or "").strip(),
+        "MANDATE_ID": (request.form.get("field_mand_id") or "").strip(),
+        "MANDATE_DATE": (request.form.get("field_mand_date") or "").strip(),
+        "CONTACT_IBAN": (request.form.get("field_contact_iban") or "").strip(),
+    }
+
+
+def _render_settings_page(
+    domain: str,
+    token: str,
+    member_id: str | None,
+    *,
+    saved: bool = False,
+    info_messages: list[str] | None = None,
+    error_messages: list[str] | None = None,
+    field_values: dict | None = None,
+    creditor_values: dict | None = None,
+):
+    field_values = dict(field_values or _load_saved_field_options(domain, token))
+    creditor_values = dict(creditor_values or {
+        "creditor_name": _get_creditor_option(domain, token, "CREDITOR_NAME"),
+        "creditor_iban": _get_creditor_option(domain, token, "CREDITOR_IBAN"),
+        "creditor_bic": _get_creditor_option(domain, token, "CREDITOR_BIC"),
+        "creditor_ci": _get_creditor_option(domain, token, "CREDITOR_CI"),
+    })
+
+    page_error_messages = list(error_messages or [])
+
+    try:
+        deal_ufs = get_deal_userfields(domain, token) or []
+    except Exception:
+        deal_ufs = []
+        page_error_messages.append("Deal-Felder konnten nicht geladen werden.")
+
+    try:
+        contact_ufs = list_contact_userfields(domain, token) or []
+    except Exception:
+        contact_ufs = []
+        page_error_messages.append("Kontakt-Felder konnten nicht geladen werden.")
+
+    return render_template(
+        "settings.html",
+        access_token=token,
+        domain=domain,
+        member_id=member_id,
+        saved=saved,
+        error_messages=_dedupe_messages(page_error_messages),
+        info_messages=_dedupe_messages(list(info_messages or [])),
+        field_name=field_values.get("DEBTOR_NAME") or "",
+        field_mand_id=field_values.get("MANDATE_ID") or "",
+        field_mand_date=field_values.get("MANDATE_DATE") or "",
+        field_contact_iban=field_values.get("CONTACT_IBAN") or "",
+        deal_uf_codes=_field_option_list(deal_ufs),
+        contact_uf_codes=_field_option_list(contact_ufs),
+        creditor_name=creditor_values.get("creditor_name") or "",
+        creditor_iban=creditor_values.get("creditor_iban") or "",
+        creditor_bic=creditor_values.get("creditor_bic") or "",
+        creditor_ci=creditor_values.get("creditor_ci") or "",
+    )
+
+
+def _run_field_setup(domain: str, token: str, *, requested_options: dict | None = None) -> dict:
+    info_messages = []
+    error_messages = []
+    saved_options = _load_saved_field_options(domain, token)
+    requested_options = dict(requested_options or saved_options)
+    missing_logical_names = [name for name, value in requested_options.items() if not value]
+
+    applied_codes = {}
+    for logical_name in FIELD_OPTION_NAMES:
+        requested_value = (requested_options.get(logical_name) or "").strip()
+        if requested_value:
+            applied_codes[logical_name] = requested_value
+        else:
+            applied_codes[logical_name] = ""
+
+    detected_logical_names = []
+    linked_logical_names = []
+    created_logical_names = []
+
+    try:
+        resolve_field_codes.cache_clear()
+        detected = scan_field_codes(domain, token, None)
+    except Exception as exc:
+        if _is_expired_token_error(exc):
+            raise
+        detected = {}
+        error_messages.append(f"Der Feld-Scan konnte nicht ausgeführt werden: {exc}")
+
+    for logical_name in missing_logical_names:
+        code = (detected.get(logical_name) or "").strip()
+        if code:
+            applied_codes[logical_name] = code
+            detected_logical_names.append(logical_name)
+
+    deal_userfields = []
+    contact_userfields = []
+    deal_lookup_failed = False
+    contact_lookup_failed = False
+
+    if any(
+        not applied_codes.get(logical_name) and SEPA_USERFIELD_SPECS[logical_name]["scope"] == "deal"
+        for logical_name in missing_logical_names
+    ):
+        try:
+            deal_userfields = get_deal_userfields(domain, token) or []
+        except Exception as exc:
+            if _is_expired_token_error(exc):
+                raise
+            deal_lookup_failed = True
+            error_messages.append(f"Deal-Felder konnten nicht geladen werden: {exc}")
+
+    if any(
+        not applied_codes.get(logical_name) and SEPA_USERFIELD_SPECS[logical_name]["scope"] == "contact"
+        for logical_name in missing_logical_names
+    ):
+        try:
+            contact_userfields = list_contact_userfields(domain, token) or []
+        except Exception as exc:
+            if _is_expired_token_error(exc):
+                raise
+            contact_lookup_failed = True
+            error_messages.append(f"Kontakt-Felder konnten nicht geladen werden: {exc}")
+
+    for logical_name in missing_logical_names:
+        if applied_codes.get(logical_name):
+            continue
+
+        spec = SEPA_USERFIELD_SPECS[logical_name]
+        scope = spec["scope"]
+        current_userfields = contact_userfields if scope == "contact" else deal_userfields
+        scope_lookup_failed = contact_lookup_failed if scope == "contact" else deal_lookup_failed
+
+        if not scope_lookup_failed:
+            existing = find_userfield_by_spec(current_userfields, logical_name)
+            code = (existing or {}).get("FIELD_NAME") or ""
+            code = code.strip()
+            if code:
+                applied_codes[logical_name] = code
+                linked_logical_names.append(logical_name)
+                continue
+
+        try:
+            ensured_field, was_created, refreshed_userfields = ensure_sepa_userfield(
+                domain,
+                token,
+                logical_name,
+                userfields=current_userfields,
+            )
+        except Exception as exc:
+            if _is_expired_token_error(exc):
+                raise
+            error_messages.append(
+                f"Das Feld '{spec['label']}' konnte in {USERFIELD_SCOPE_LABELS[scope]} nicht automatisch angelegt werden: {exc}"
+            )
+            continue
+
+        if scope == "contact":
+            contact_userfields = refreshed_userfields
+        else:
+            deal_userfields = refreshed_userfields
+
+        code = (ensured_field or {}).get("FIELD_NAME") or ""
+        code = code.strip()
+        if not code:
+            error_messages.append(
+                f"Das Feld '{spec['label']}' wurde erstellt, konnte aber danach nicht sauber gelesen werden."
+            )
+            continue
+
+        applied_codes[logical_name] = code
+        if was_created:
+            created_logical_names.append(logical_name)
+        else:
+            linked_logical_names.append(logical_name)
+
+    for logical_name, option_name in FIELD_OPTION_NAMES.items():
+        previous = saved_options.get(logical_name) or ""
+        current = applied_codes.get(logical_name) or ""
+        if not current or current == previous:
+            continue
+        try:
+            app_opt_set(domain, token, option_name, current)
+        except Exception as exc:
+            if _is_expired_token_error(exc):
+                raise
+            error_messages.append(
+                f"Die Feldzuordnung für '{SEPA_USERFIELD_SPECS[logical_name]['label']}' konnte nicht gespeichert werden: {exc}"
+            )
+
+    resolve_field_codes.cache_clear()
+
+    if detected_logical_names or linked_logical_names or created_logical_names:
+        info_messages.append("Auto-Erkennung wurde ausgeführt.")
+    elif not missing_logical_names and not error_messages:
+        info_messages.append("Auto-Erkennung wurde ausgeführt. Alle Feldzuordnungen sind bereits gesetzt.")
+    elif not error_messages:
+        info_messages.append("Auto-Erkennung wurde ausgeführt. Es wurde keine passende Feldzuordnung gefunden.")
+
+    mapped_logical_names = detected_logical_names + linked_logical_names
+    if mapped_logical_names:
+        _append_scope_feedback_messages(
+            info_messages,
+            "Felder gefunden in",
+            mapped_logical_names,
+        )
+
+    if created_logical_names:
+        _append_scope_feedback_messages(
+            info_messages,
+            "Neue Felder automatisch angelegt in",
+            created_logical_names,
+        )
+        info_messages.append(
+            "Bitte die neu erstellten Felder in Bitrix24 bei Kontakte bzw. Aufträge in der Kartenansicht oder im Formular einblenden, falls sie dort noch nicht sichtbar sind."
+        )
+
+    return {
+        "info_messages": _dedupe_messages(info_messages),
+        "error_messages": _dedupe_messages(error_messages),
+    }
 
 
 def _is_expired_token_error(exc: Exception) -> bool:
@@ -386,10 +644,11 @@ def settings():
         else:
             info_messages.append("Auto-Erkennung abgeschlossen. Es wurde keine passende Zuordnung gefunden.")
 
-    field_name = app_opt_get(domain, token, "FIELD_DEBTOR_NAME") or ""
-    field_mand_id = app_opt_get(domain, token, "FIELD_MANDATE_ID") or ""
-    field_mand_date = app_opt_get(domain, token, "FIELD_MANDATE_DATE") or ""
-    field_contact_iban = app_opt_get(domain, token, "FIELD_CONTACT_IBAN") or ""
+    saved_field_options = _load_saved_field_options(domain, token)
+    field_name = saved_field_options["DEBTOR_NAME"]
+    field_mand_id = saved_field_options["MANDATE_ID"]
+    field_mand_date = saved_field_options["MANDATE_DATE"]
+    field_contact_iban = saved_field_options["CONTACT_IBAN"]
 
     creditor_name = _get_creditor_option(domain, token, "CREDITOR_NAME")
     creditor_iban = _get_creditor_option(domain, token, "CREDITOR_IBAN")
@@ -409,21 +668,6 @@ def settings():
 
         if not creditor_name:
             error_messages.append("Bitte einen Gläubiger-Namen angeben.")
-
-    try:
-        deal_ufs = get_deal_userfields(domain, token) or []
-    except Exception:
-        deal_ufs = []
-        error_messages.append("Deal-Felder konnten nicht geladen werden.")
-
-    try:
-        contact_ufs = list_contact_userfields(domain, token) or []
-    except Exception:
-        contact_ufs = []
-        error_messages.append("Kontakt-Felder konnten nicht geladen werden.")
-
-    deal_uf_codes = _field_option_list(deal_ufs)
-    contact_uf_codes = _field_option_list(contact_ufs)
 
     if request.method == "POST" and not error_messages:
         field_save_failed = False
@@ -460,46 +704,47 @@ def settings():
             saved = True
             info_messages.append("Einstellungen gespeichert.")
 
-    return render_template(
-        "settings.html",
-        access_token=token,
-        domain=domain,
-        member_id=member_id,
+    return _render_settings_page(
+        domain,
+        token,
+        member_id,
         saved=saved,
-        error_messages=_dedupe_messages(error_messages),
-        info_messages=_dedupe_messages(info_messages),
-        field_name=field_name,
-        field_mand_id=field_mand_id,
-        field_mand_date=field_mand_date,
-        field_contact_iban=field_contact_iban,
-        deal_uf_codes=deal_uf_codes,
-        contact_uf_codes=contact_uf_codes,
-        creditor_name=creditor_name,
-        creditor_iban=creditor_iban,
-        creditor_bic=creditor_bic,
-        creditor_ci=creditor_ci,
+        info_messages=info_messages,
+        error_messages=error_messages,
+        field_values={
+            "DEBTOR_NAME": field_name,
+            "MANDATE_ID": field_mand_id,
+            "MANDATE_DATE": field_mand_date,
+            "CONTACT_IBAN": field_contact_iban,
+        },
+        creditor_values={
+            "creditor_name": creditor_name,
+            "creditor_iban": creditor_iban,
+            "creditor_bic": creditor_bic,
+            "creditor_ci": creditor_ci,
+        },
     )
 
 
-@main_bp.get("/debug_detect_mandate_fields")
+@main_bp.route("/debug_detect_mandate_fields", methods=["GET", "POST"])
 def debug_detect_mandate_fields():
     domain, token, member_id = get_domain_and_token()
     if not token or not domain:
         return render_template("auth_bootstrap.html")
 
     try:
-        resolve_field_codes.cache_clear()
-        detected = resolve_field_codes(domain, token, None)
-
-        saved = 0
-        for logical_name in ("DEBTOR_NAME", "MANDATE_ID", "MANDATE_DATE", "CONTACT_IBAN"):
-            code = detected.get(logical_name)
-            if code:
-                app_opt_set(domain, token, f"FIELD_{logical_name}", code)
-                saved += 1
-
-        resolve_field_codes.cache_clear()
-        return redirect(_with_auth_query("/settings", domain, token, member_id, autodetected=saved))
+        result = _run_field_setup(
+            domain,
+            token,
+            requested_options=_requested_field_options(_load_saved_field_options(domain, token)),
+        )
+        return _render_settings_page(
+            domain,
+            token,
+            member_id,
+            info_messages=result["info_messages"],
+            error_messages=result["error_messages"],
+        )
     except Exception as exc:
         if _is_expired_token_error(exc):
             _clear_auth_session()

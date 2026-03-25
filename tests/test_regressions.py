@@ -12,7 +12,7 @@ os.environ.setdefault("BITRIX_CLIENT_SECRET", "test-secret")
 
 from app import create_app
 from app.config.app_options import app_opt_get, app_opt_set
-from app.domain.userfields import list_deals_page
+from app.domain.userfields import detect_iban_userfield, detect_logical_userfield, ensure_sepa_userfield, list_deals_page
 from app.services.bitrix_helper import b24_call_raw
 from app.services.export import PAIN_008_NS, build_pain008_xml
 
@@ -93,6 +93,77 @@ class PagingTests(unittest.TestCase):
         self.assertEqual(rows[-1]["ID"], "74")
         self.assertTrue(has_next)
         self.assertEqual(mocked_call.call_count, 2)
+
+
+class UserfieldProvisioningTests(unittest.TestCase):
+    def test_ensure_sepa_userfield_uses_existing_field_without_duplicate_create(self):
+        existing = {
+            "FIELD_NAME": "UF_CRM_SEPA_IBAN",
+            "XML_ID": "SEPA_IBAN",
+        }
+
+        with patch("app.domain.userfields.b24_call") as mocked_call:
+            userfield, created, refreshed = ensure_sepa_userfield(
+                "example.bitrix24.de",
+                "token-1",
+                "CONTACT_IBAN",
+                userfields=[existing],
+            )
+
+        self.assertEqual(userfield, existing)
+        self.assertFalse(created)
+        self.assertEqual(refreshed, [existing])
+        mocked_call.assert_not_called()
+
+    def test_ensure_sepa_userfield_creates_missing_field_and_reloads_entity_fields(self):
+        created_field = {
+            "FIELD_NAME": "UF_CRM_SEPA_MANDATE_ID",
+            "XML_ID": "SEPA_MANDATE_ID",
+        }
+
+        with patch("app.domain.userfields.b24_call") as mocked_call, \
+             patch("app.domain.userfields.get_deal_userfields", return_value=[created_field]):
+            userfield, created, refreshed = ensure_sepa_userfield(
+                "example.bitrix24.de",
+                "token-1",
+                "MANDATE_ID",
+                userfields=[],
+            )
+
+        self.assertEqual(userfield, created_field)
+        self.assertTrue(created)
+        self.assertEqual(refreshed, [created_field])
+        mocked_call.assert_called_once()
+
+
+class UserfieldDetectionTests(unittest.TestCase):
+    def test_detect_logical_userfield_handles_synonyms_without_confusing_date_and_id(self):
+        userfields = [
+            {
+                "FIELD_NAME": "UF_CRM_MANDATE_DATE",
+                "USER_TYPE_ID": "date",
+                "EDIT_FORM_LABEL": "Mandatsdatum",
+            },
+            {
+                "FIELD_NAME": "UF_CRM_MANDATE_REF",
+                "USER_TYPE_ID": "string",
+                "EDIT_FORM_LABEL": "Mandatsreferens",
+            },
+        ]
+
+        self.assertEqual(detect_logical_userfield(userfields, "MANDATE_ID"), "UF_CRM_MANDATE_REF")
+        self.assertEqual(detect_logical_userfield(userfields, "MANDATE_DATE"), "UF_CRM_MANDATE_DATE")
+
+    def test_detect_iban_userfield_accepts_alternative_contact_labels(self):
+        userfields = [
+            {
+                "FIELD_NAME": "UF_CRM_CONTACT_BANK",
+                "USER_TYPE_ID": "string",
+                "EDIT_FORM_LABEL": "Kontoverbindung",
+            }
+        ]
+
+        self.assertEqual(detect_iban_userfield(userfields), "UF_CRM_CONTACT_BANK")
 
 
 class BitrixHelperTests(unittest.TestCase):
@@ -219,6 +290,117 @@ class RouteTests(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertIn("UF_CRM_DEAL_NO_LABEL", body)
 
+    def test_settings_get_does_not_run_initial_scan_anymore(self):
+        self._set_session_auth()
+
+        with patch("app.routes.routes.app_opt_get", return_value=""), \
+             patch("app.routes.routes.scan_field_codes") as mocked_scan, \
+             patch("app.routes.routes.get_deal_userfields", return_value=[]), \
+             patch("app.routes.routes.list_contact_userfields", return_value=[]):
+            response = self.client.get("/settings")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertNotIn("Auto-Erkennung wurde ausgeführt.", body)
+        mocked_scan.assert_not_called()
+
+    def test_manual_field_setup_rescans_all_when_form_fields_are_blank(self):
+        self._set_session_auth()
+
+        option_values = {
+            "FIELD_DEBTOR_NAME": "UF_CRM_OLD_DEBTOR",
+            "FIELD_MANDATE_ID": "UF_CRM_OLD_MANDATE_ID",
+            "FIELD_MANDATE_DATE": "UF_CRM_OLD_MANDATE_DATE",
+            "FIELD_CONTACT_IBAN": "UF_CRM_OLD_IBAN",
+        }
+
+        with patch("app.routes.routes.app_opt_get", side_effect=lambda domain, token, key: option_values.get(key, "")), \
+             patch("app.routes.routes.app_opt_set") as mocked_set, \
+             patch("app.routes.routes.scan_field_codes", return_value={
+                 "DEBTOR_NAME": "UF_CRM_SEPA_DEBTOR",
+                 "MANDATE_ID": "UF_CRM_SEPA_MANDATE_ID",
+                 "MANDATE_DATE": "UF_CRM_SEPA_MANDATE_DATE",
+                 "CONTACT_IBAN": "UF_CRM_SEPA_IBAN",
+             }), \
+             patch("app.routes.routes.get_deal_userfields", return_value=[]), \
+             patch("app.routes.routes.list_contact_userfields", return_value=[]):
+            response = self.client.post(
+                "/debug_detect_mandate_fields",
+                data={
+                    "auth[access_token]": "session-token",
+                    "auth[domain]": "example.bitrix24.de",
+                    "auth[member_id]": "member-1",
+                    "field_name": "",
+                    "field_mand_id": "",
+                    "field_mand_date": "",
+                    "field_contact_iban": "",
+                },
+                follow_redirects=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Auto-Erkennung wurde ausgeführt.", body)
+        self.assertIn("Felder gefunden in Aufträge: SEPA Debitor-Name, SEPA Mandats-ID, SEPA Mandatsdatum.", body)
+        self.assertIn("Felder gefunden in Kontakte: SEPA IBAN.", body)
+        mocked_set.assert_any_call("example.bitrix24.de", "session-token", "FIELD_DEBTOR_NAME", "UF_CRM_SEPA_DEBTOR")
+        mocked_set.assert_any_call("example.bitrix24.de", "session-token", "FIELD_MANDATE_ID", "UF_CRM_SEPA_MANDATE_ID")
+        mocked_set.assert_any_call("example.bitrix24.de", "session-token", "FIELD_MANDATE_DATE", "UF_CRM_SEPA_MANDATE_DATE")
+        mocked_set.assert_any_call("example.bitrix24.de", "session-token", "FIELD_CONTACT_IBAN", "UF_CRM_SEPA_IBAN")
+
+    def test_manual_field_setup_creates_missing_fields_when_only_some_are_blank(self):
+        self._set_session_auth()
+
+        option_values = {
+            "FIELD_DEBTOR_NAME": "UF_CRM_FIXED_DEBTOR",
+            "FIELD_MANDATE_ID": "",
+            "FIELD_MANDATE_DATE": "",
+            "FIELD_CONTACT_IBAN": "",
+        }
+        created_deal_fields = [
+            {"FIELD_NAME": "UF_CRM_SEPA_MANDATE_DATE", "USER_TYPE_ID": "date", "EDIT_FORM_LABEL": "SEPA Mandatsdatum"},
+        ]
+        created_contact_fields = [
+            {"FIELD_NAME": "UF_CRM_SEPA_IBAN", "USER_TYPE_ID": "string", "EDIT_FORM_LABEL": "SEPA IBAN"},
+        ]
+
+        def ensure_side_effect(domain, token, logical_name, userfields=None):
+            if logical_name == "CONTACT_IBAN":
+                return created_contact_fields[0], True, created_contact_fields
+            return created_deal_fields[0], True, created_deal_fields
+
+        with patch("app.routes.routes.app_opt_get", side_effect=lambda domain, token, key: option_values.get(key, "")), \
+             patch("app.routes.routes.app_opt_set") as mocked_set, \
+             patch("app.routes.routes.scan_field_codes", return_value={
+                 "MANDATE_ID": "UF_CRM_DETECTED_MANDATE_ID",
+             }), \
+             patch("app.routes.routes.get_deal_userfields", return_value=[]), \
+             patch("app.routes.routes.list_contact_userfields", return_value=[]), \
+             patch("app.routes.routes.ensure_sepa_userfield", side_effect=ensure_side_effect):
+            response = self.client.post(
+                "/debug_detect_mandate_fields",
+                data={
+                    "auth[access_token]": "session-token",
+                    "auth[domain]": "example.bitrix24.de",
+                    "auth[member_id]": "member-1",
+                    "field_name": "UF_CRM_FIXED_DEBTOR",
+                    "field_mand_id": "",
+                    "field_mand_date": "",
+                    "field_contact_iban": "",
+                },
+                follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Felder gefunden in Aufträge: SEPA Mandats-ID.", body)
+        self.assertIn("Neue Felder automatisch angelegt in Aufträge: SEPA Mandatsdatum.", body)
+        self.assertIn("Neue Felder automatisch angelegt in Kontakte: SEPA IBAN.", body)
+        self.assertFalse(any(call.args[2] == "FIELD_DEBTOR_NAME" for call in mocked_set.call_args_list))
+        mocked_set.assert_any_call("example.bitrix24.de", "session-token", "FIELD_MANDATE_ID", "UF_CRM_DETECTED_MANDATE_ID")
+        mocked_set.assert_any_call("example.bitrix24.de", "session-token", "FIELD_MANDATE_DATE", "UF_CRM_SEPA_MANDATE_DATE")
+        mocked_set.assert_any_call("example.bitrix24.de", "session-token", "FIELD_CONTACT_IBAN", "UF_CRM_SEPA_IBAN")
+
     def test_install_redirect_preserves_auth_query_and_session(self):
         with patch("app.routes.routes.app_opt_set"):
             response = self.client.get(
@@ -303,7 +485,7 @@ class RouteTests(unittest.TestCase):
     def test_debug_detect_mandate_fields_falls_back_to_auth_bootstrap_when_token_is_expired(self):
         self._set_session_auth()
 
-        with patch("app.routes.routes.resolve_field_codes", side_effect=RuntimeError("The access token provided has expired.")):
+        with patch("app.routes.routes.scan_field_codes", side_effect=RuntimeError("The access token provided has expired.")):
             response = self.client.get("/debug_detect_mandate_fields")
 
         self.assertEqual(response.status_code, 200)
