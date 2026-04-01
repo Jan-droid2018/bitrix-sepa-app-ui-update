@@ -42,6 +42,49 @@
                 {% endfor %}
             </div>
 
+            <section id="billing-panel" class="panel">
+                <div class="panel-body stacked-gap">
+                    <div class="section-head compact">
+                        <div>
+                            <h2 class="panel-title">Plan & Upgrade</h2>
+                            <p>Hier kannst du den aktuellen Tarif sehen und direkt Stripe Checkout starten.</p>
+                        </div>
+                    </div>
+
+                    <div class="metrics-grid">
+                        <div class="metric-card {% if billing_is_pro %}status-card{% elif billing_limit_reached %}status-card error{% endif %}">
+                            <div class="metric-label">Aktueller Plan</div>
+                            <div class="metric-value compact-value">{{ billing_plan_label }}</div>
+                            <div class="metric-note">{{ billing_status_text }}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Nutzung</div>
+                            <div class="metric-value compact-value">{% if billing_is_pro %}Unbegrenzt{% else %}{{ billing_exports_used }}/1{% endif %}</div>
+                            <div class="metric-note">{{ billing_usage_text }}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Abrechnung</div>
+                            <div class="metric-value compact-value">{{ billing_exports_limit_text }}</div>
+                            <div class="metric-note">Bitrix Member-ID: {{ billing_member_id or 'nicht verfügbar' }}</div>
+                        </div>
+                    </div>
+
+                    <div id="checkout-feedback" class="message error" hidden></div>
+
+                    <div class="inline-actions">
+                        {% if billing_is_pro %}
+                            <span class="ok-pill">Pro aktiv</span>
+                        {% elif billing_checkout_enabled %}
+                            <button id="upgrade-button" class="btn btn-primary" type="button">Upgrade auf Pro</button>
+                            <span class="small">Startet Stripe Checkout für dieses Bitrix24-Mitglied.</span>
+                        {% else %}
+                            <span class="pill">Upgrade aktuell nicht verfügbar</span>
+                            <span class="small">Sobald `member_id` vorliegt, kann Checkout gestartet werden.</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </section>
+
             <div id="auto-detect-progress" class="progress-overlay" hidden aria-hidden="true">
                 <div class="progress-card" role="status" aria-live="polite">
                     <div class="progress-title">Auto-Erkennung läuft</div>
@@ -161,9 +204,23 @@
                 var form = document.getElementById("settings-form");
                 var progress = document.getElementById("auto-detect-progress");
                 var autoDetectButton = document.getElementById("auto-detect-button");
+                var upgradeButton = document.getElementById("upgrade-button");
+                var checkoutFeedback = document.getElementById("checkout-feedback");
+                var memberId = {{ billing_member_id|tojson }};
+                var accessToken = {{ access_token|tojson }};
+                var domain = {{ domain|tojson }};
 
                 if (!form || !progress || !autoDetectButton) {
                     return;
+                }
+
+                function showCheckoutError(message) {
+                    if (!checkoutFeedback) {
+                        return;
+                    }
+
+                    checkoutFeedback.hidden = false;
+                    checkoutFeedback.textContent = message;
                 }
 
                 form.addEventListener("submit", function (event) {
@@ -184,6 +241,70 @@
                     submitter.disabled = true;
                     submitter.textContent = "Auto-Erkennung läuft...";
                 });
+
+                if (upgradeButton) {
+                    upgradeButton.addEventListener("click", function () {
+                        var previousText = upgradeButton.textContent;
+                        var body = new URLSearchParams();
+
+                        if (checkoutFeedback) {
+                            checkoutFeedback.hidden = true;
+                            checkoutFeedback.textContent = "";
+                        }
+
+                        upgradeButton.disabled = true;
+                        upgradeButton.textContent = "Checkout wird gestartet...";
+
+                        if (memberId) {
+                            body.set("auth[member_id]", memberId);
+                        }
+                        if (accessToken) {
+                            body.set("auth[access_token]", accessToken);
+                        }
+                        if (domain) {
+                            body.set("auth[domain]", domain);
+                        }
+
+                        fetch("/create-checkout-session", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+                            },
+                            body: body.toString()
+                        })
+                            .then(function (response) {
+                                return response.json().catch(function () {
+                                    return {};
+                                }).then(function (data) {
+                                    if (!response.ok) {
+                                        throw new Error(data.error || "Stripe Checkout konnte nicht gestartet werden.");
+                                    }
+                                    return data;
+                                });
+                            })
+                            .then(function (data) {
+                                if (!data.url) {
+                                    throw new Error("Stripe Checkout hat keine Weiterleitungs-URL geliefert.");
+                                }
+
+                                try {
+                                    if (window.top && window.top !== window) {
+                                        window.top.location.href = data.url;
+                                        return;
+                                    }
+                                } catch (error) {
+                                    console.debug("Top redirect fallback", error);
+                                }
+
+                                window.location.href = data.url;
+                            })
+                            .catch(function (error) {
+                                showCheckoutError(error.message || "Stripe Checkout konnte nicht gestartet werden.");
+                                upgradeButton.disabled = false;
+                                upgradeButton.textContent = previousText;
+                            });
+                    });
+                }
             })();
         </script>
     </body>

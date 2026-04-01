@@ -389,7 +389,7 @@ class RouteTests(unittest.TestCase):
                     "field_contact_iban": "",
                 },
                 follow_redirects=True,
-        )
+            )
 
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)

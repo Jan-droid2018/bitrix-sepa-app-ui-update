@@ -36,6 +36,15 @@ from app.validation.validate import (
     validate_iban,
     validate_mandate_id,
 )
+from db import (
+    can_export,
+    create_user_if_not_exists,
+    find_user_by_stripe_ids,
+    get_user,
+    increase_export,
+    set_plan,
+    set_stripe_ids,
+)
 
 
 main_bp = Blueprint("main", __name__)
@@ -74,6 +83,15 @@ def _request_value(*names):
     return None
 
 
+def _request_member_id(current_member_id: str | None = None) -> str | None:
+    member_id = _request_value("auth[member_id]", "member_id")
+    if member_id not in (None, ""):
+        return member_id
+    if current_member_id not in (None, ""):
+        return current_member_id
+    return session.get("member_id")
+
+
 def _store_auth_from_request() -> bool:
     token = _request_value("auth[access_token]", "AUTH_ID")
     domain = _request_value("auth[domain]", "DOMAIN")
@@ -97,6 +115,67 @@ def _store_auth_from_request() -> bool:
             session.pop("expires_at", None)
 
     return has_direct_auth
+
+
+def _external_url(path: str) -> str:
+    base_url = request.host_url.rstrip("/")
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return f"{base_url}{path}"
+
+
+def _import_stripe():
+    try:
+        import stripe
+    except ImportError as exc:
+        raise RuntimeError("Stripe library fehlt. Bitte requirements installieren.") from exc
+    return stripe
+
+
+def _get_stripe_api():
+    stripe = _import_stripe()
+    secret_key = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
+    if not secret_key:
+        raise RuntimeError("STRIPE_SECRET_KEY fehlt.")
+    stripe.api_key = secret_key
+    return stripe
+
+
+def _extract_member_id_from_stripe_object(obj: dict | None) -> str | None:
+    payload = obj or {}
+
+    metadata = payload.get("metadata") or {}
+    member_id = (metadata.get("member_id") or "").strip()
+    if member_id:
+        return member_id
+
+    subscription_details = payload.get("subscription_details") or {}
+    metadata = subscription_details.get("metadata") or {}
+    member_id = (metadata.get("member_id") or "").strip()
+    if member_id:
+        return member_id
+
+    return None
+
+
+def _resolve_member_id_from_stripe_object(
+    obj: dict | None,
+    *,
+    fallback_subscription_id: str | None = None,
+) -> str | None:
+    member_id = _extract_member_id_from_stripe_object(obj)
+    if member_id:
+        return member_id
+
+    payload = obj or {}
+    user = find_user_by_stripe_ids(
+        stripe_customer_id=payload.get("customer"),
+        stripe_subscription_id=fallback_subscription_id or payload.get("subscription") or payload.get("id"),
+    )
+    if user:
+        return user.get("member_id")
+
+    return None
 
 
 def _auth_params(domain: str | None, token: str | None, member_id: str | None, **extra) -> dict:
@@ -143,6 +222,65 @@ def _dedupe_messages(messages: list[str]) -> list[str]:
             seen.add(msg)
             out.append(msg)
     return out
+
+
+def _billing_context(member_id: str | None) -> dict:
+    member_id = (member_id or "").strip()
+    if not member_id:
+        return {
+            "billing_member_id": "",
+            "billing_plan": "free",
+            "billing_plan_label": "Free",
+            "billing_is_pro": False,
+            "billing_exports_used": 0,
+            "billing_exports_limit": 1,
+            "billing_exports_limit_text": "1 Export / Monat",
+            "billing_exports_remaining": 0,
+            "billing_usage_text": "Member-ID fehlt. Billing-Status kann noch nicht geladen werden.",
+            "billing_status_text": "Upgrade aktuell nicht verfügbar",
+            "billing_checkout_enabled": False,
+            "billing_can_export": False,
+            "billing_limit_reached": False,
+        }
+
+    create_user_if_not_exists(member_id)
+    user = get_user(member_id) or {}
+    plan = (user.get("plan") or "free").strip().lower()
+    is_pro = plan == "pro"
+    exports_used = int(user.get("exports_used") or 0)
+    export_limit = None if is_pro else 1
+    exports_remaining = None if is_pro else max(0, 1 - exports_used)
+    export_allowed = can_export(user)
+
+    if is_pro:
+        usage_text = "Pro Plan aktiv. Exporte sind unbegrenzt."
+        status_text = "Unbegrenzte Exporte verfügbar"
+        limit_text = "Unbegrenzt"
+    else:
+        usage_text = f"{exports_used} von 1 Export im aktuellen Monat verwendet."
+        if exports_remaining == 1:
+            status_text = "1 Export in diesem Monat verfügbar"
+        elif exports_remaining == 0:
+            status_text = "Monatslimit erreicht"
+        else:
+            status_text = f"{exports_remaining} Exporte verfügbar"
+        limit_text = "1 Export / Monat"
+
+    return {
+        "billing_member_id": member_id,
+        "billing_plan": plan,
+        "billing_plan_label": "Pro" if is_pro else "Free",
+        "billing_is_pro": is_pro,
+        "billing_exports_used": exports_used,
+        "billing_exports_limit": export_limit,
+        "billing_exports_limit_text": limit_text,
+        "billing_exports_remaining": exports_remaining,
+        "billing_usage_text": usage_text,
+        "billing_status_text": status_text,
+        "billing_checkout_enabled": True,
+        "billing_can_export": export_allowed,
+        "billing_limit_reached": not export_allowed and not is_pro,
+    }
 
 
 def _field_option_list(userfields: list[dict]) -> list[dict]:
@@ -249,6 +387,7 @@ def _render_settings_page(
         creditor_iban=creditor_values.get("creditor_iban") or "",
         creditor_bic=creditor_values.get("creditor_bic") or "",
         creditor_ci=creditor_values.get("creditor_ci") or "",
+        **_billing_context(member_id),
     )
 
 
@@ -480,7 +619,7 @@ def _build_index_context(domain: str | None, token: str | None, member_id: str |
 
     page = _parse_int(request.values.get("page"), 1, min_value=1)
 
-    return {
+    context = {
         "access_token": token or "",
         "domain": domain or "",
         "member_id": member_id or "",
@@ -504,6 +643,8 @@ def _build_index_context(domain: str | None, token: str | None, member_id: str |
         "mandate_id_field": None,
         "mandate_date_field": None,
     }
+    context.update(_billing_context(member_id))
+    return context
 
 
 def _populate_index_listing(domain: str, token: str, context: dict):
@@ -758,6 +899,29 @@ def export_pain008():
     if not token or not domain:
         return render_template("auth_bootstrap.html")
 
+    member_id = _request_member_id(member_id)
+    if not member_id:
+        return _render_index(
+            domain,
+            token,
+            None,
+            preserve_listing=True,
+            error_messages=["Member-ID fehlt. Export kann nicht freigegeben werden."],
+            status_code=400,
+        )
+
+    create_user_if_not_exists(member_id)
+    user = get_user(member_id)
+    if not can_export(user):
+        return _render_index(
+            domain,
+            token,
+            member_id,
+            preserve_listing=True,
+            error_messages=["Free Plan erreicht: 1 Export pro Monat. Bitte auf Pro upgraden oder bis zum nächsten Monat warten."],
+            status_code=403,
+        )
+
     debug_lines = []
     _debug_log(debug_lines, "Start export_pain008")
 
@@ -979,6 +1143,8 @@ def export_pain008():
         }
     })
 
+    increase_export(member_id)
+
     return _render_index(
         domain,
         token,
@@ -986,6 +1152,139 @@ def export_pain008():
         preserve_listing=True,
         info_messages=[f"SEPA-Export erfolgreich. Neuer Auftrag #{new_deal_id} wurde erstellt."],
     )
+
+
+@main_bp.post("/create-checkout-session")
+def create_checkout_session():
+    _store_auth_from_request()
+    member_id = _request_member_id(session.get("member_id"))
+    if not member_id:
+        return jsonify({"error": "Member-ID fehlt."}), 400
+
+    create_user_if_not_exists(member_id)
+    user = get_user(member_id)
+    if user and (user.get("plan") or "").strip().lower() == "pro":
+        return jsonify({"error": "Pro Plan ist bereits aktiv."}), 400
+
+    price_id = (os.getenv("STRIPE_PRICE_ID") or "").strip()
+    if not price_id:
+        return jsonify({"error": "STRIPE_PRICE_ID fehlt."}), 500
+
+    try:
+        stripe = _get_stripe_api()
+        checkout_session = stripe.checkout.Session.create(
+            mode="subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            success_url=_external_url("/success"),
+            cancel_url=_external_url("/cancel"),
+            client_reference_id=member_id,
+            metadata={"member_id": member_id},
+            subscription_data={"metadata": {"member_id": member_id}},
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({"id": checkout_session.id, "url": checkout_session.url})
+
+
+@main_bp.post("/stripe/webhook")
+def stripe_webhook():
+    webhook_secret = (os.getenv("STRIPE_WEBHOOK_SECRET") or "").strip()
+    if not webhook_secret:
+        return jsonify({"error": "STRIPE_WEBHOOK_SECRET fehlt."}), 500
+
+    try:
+        stripe = _import_stripe()
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    payload = request.get_data()
+    signature = request.headers.get("Stripe-Signature", "")
+    if not signature:
+        return jsonify({"error": "Stripe-Signature fehlt."}), 400
+
+    try:
+        event = stripe.Webhook.construct_event(payload, signature, webhook_secret)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    event_type = event.get("type")
+    data_object = ((event.get("data") or {}).get("object")) or {}
+
+    if event_type == "checkout.session.completed":
+        member_id = _resolve_member_id_from_stripe_object(
+            data_object,
+            fallback_subscription_id=data_object.get("subscription"),
+        )
+        if member_id:
+            set_plan(member_id, "pro")
+            set_stripe_ids(member_id, data_object.get("customer"), data_object.get("subscription"))
+
+    elif event_type == "customer.subscription.deleted":
+        member_id = _resolve_member_id_from_stripe_object(
+            data_object,
+            fallback_subscription_id=data_object.get("id"),
+        )
+        if member_id:
+            current_user = get_user(member_id) or {}
+            set_plan(member_id, "free")
+            set_stripe_ids(
+                member_id,
+                data_object.get("customer") or current_user.get("stripe_customer_id"),
+                None,
+            )
+
+    elif event_type == "invoice.payment_failed":
+        member_id = _resolve_member_id_from_stripe_object(
+            data_object,
+            fallback_subscription_id=data_object.get("subscription"),
+        )
+        if member_id:
+            current_user = get_user(member_id) or {}
+            set_plan(member_id, "free")
+            set_stripe_ids(
+                member_id,
+                data_object.get("customer") or current_user.get("stripe_customer_id"),
+                None,
+            )
+
+    return jsonify({"status": "ok"})
+
+
+@main_bp.get("/success")
+def checkout_success():
+    return """
+    <!doctype html>
+    <html lang="de">
+        <head>
+            <meta charset="utf-8"/>
+            <meta name="viewport" content="width=device-width,initial-scale=1"/>
+            <title>Abo aktiviert</title>
+        </head>
+        <body>
+            <h1>Abo erfolgreich aktiviert</h1>
+            <p>Der Pro Plan ist jetzt aktiv. Sie können dieses Fenster schließen und zur App zurückkehren.</p>
+        </body>
+    </html>
+    """
+
+
+@main_bp.get("/cancel")
+def checkout_cancel():
+    return """
+    <!doctype html>
+    <html lang="de">
+        <head>
+            <meta charset="utf-8"/>
+            <meta name="viewport" content="width=device-width,initial-scale=1"/>
+            <title>Checkout abgebrochen</title>
+        </head>
+        <body>
+            <h1>Checkout abgebrochen</h1>
+            <p>Es wurde kein Abo abgeschlossen. Sie können jederzeit erneut upgraden.</p>
+        </body>
+    </html>
+    """
 
 
 @main_bp.route("/install", methods=["GET", "POST"])

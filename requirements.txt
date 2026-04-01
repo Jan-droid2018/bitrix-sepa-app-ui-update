@@ -2,3 +2,4 @@ Flask>=3.0
 requests>=2.31
 gunicorn>=21.2
 python-dotenv
+stripe>=11.0

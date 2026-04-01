@@ -3,3 +3,7 @@ venv/
 __pycache__/
 *.pyc
 .idea/
+database.db
+billing_test*.db
+tests/tmp*/
+sqlite3.exe
