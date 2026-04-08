@@ -1,15 +1,15 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ app_lang }}">
     <head>
         <meta charset="utf-8"/>
         <meta name="viewport" content="width=device-width,initial-scale=1"/>
-        <title>SEPA Lastschrift - pain.008</title>
+        <title>{{ t("index.title") }}</title>
         <link rel="preconnect" href="https://fonts.googleapis.com"/>
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
         <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
         <link rel="stylesheet" href="{{ url_for('static', filename='bitrix24-app.css', v='20260323k') }}"/>
     </head>
-    <body class="bitrix-app">
+    <body class="bitrix-app" data-app-lang="{{ app_lang }}" data-language-mode="{{ language_mode }}">
         <div class="page-shell">
             <section class="workspace-shell">
                 <div class="workspace-inner">
@@ -18,12 +18,17 @@
                     </div>
                     <div class="workspace-head centered-head">
                         <div>
-                            <h1 class="workspace-title brand-title">SEPA Lastschrift Export</h1>
+                            <h1 class="workspace-title brand-title">{{ t("index.heading") }}</h1>
                         </div>
                     </div>
-                    <div class="bitrix-tabs centered-tabs">
-                        <span class="bitrix-tab active">Exportzentrum</span>
-                        <a class="bitrix-tab" href="/settings?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}">Einstellungen</a>
+                    <div class="workspace-action-row">
+                        <div class="bitrix-tabs centered-tabs">
+                            <span class="bitrix-tab active">{{ t("index.tab.export") }}</span>
+                            <a class="bitrix-tab" href="/settings?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}&auth[lang]={{ portal_lang_code }}">{{ t("index.tab.settings") }}</a>
+                        </div>
+                        <div class="workspace-corner-actions">
+                            {% include "_language_switch.html" %}
+                        </div>
                     </div>
                 </div>
             </section>
@@ -41,26 +46,26 @@
                 <div class="panel-body stacked-gap">
                     <div class="section-head compact">
                         <div>
-                            <h2 class="panel-title">Plan & Upgrade</h2>
-                            <p>Dein aktueller Tarif und der direkte Einstieg in Stripe Checkout.</p>
+                            <h2 class="panel-title">{{ t("billing.title") }}</h2>
+                            <p>{{ t("index.billing.subtitle") }}</p>
                         </div>
                     </div>
 
                     <div class="metrics-grid">
                         <div class="metric-card {% if billing_is_pro %}status-card{% elif billing_limit_reached %}status-card error{% endif %}">
-                            <div class="metric-label">Plan</div>
+                            <div class="metric-label">{{ t("billing.plan") }}</div>
                             <div class="metric-value compact-value">{{ billing_plan_label }}</div>
                             <div class="metric-note">{{ billing_status_text }}</div>
                         </div>
                         <div class="metric-card">
-                            <div class="metric-label">Monatsnutzung</div>
-                            <div class="metric-value compact-value">{% if billing_is_pro %}Unbegrenzt{% else %}{{ billing_exports_used }}/1{% endif %}</div>
+                            <div class="metric-label">{{ t("billing.monthly_usage") }}</div>
+                            <div class="metric-value compact-value">{% if billing_is_pro %}{{ t("billing.limit.unlimited") }}{% else %}{{ billing_exports_used }}/1{% endif %}</div>
                             <div class="metric-note">{{ billing_usage_text }}</div>
                         </div>
                         <div class="metric-card">
-                            <div class="metric-label">Upgrade</div>
+                            <div class="metric-label">{{ t("billing.upgrade") }}</div>
                             <div class="metric-value compact-value">{{ billing_exports_limit_text }}</div>
-                            <div class="metric-note">Mit Pro sind unbegrenzte Exporte aktiv.</div>
+                            <div class="metric-note">{{ t("index.billing.upgrade_note") }}</div>
                         </div>
                     </div>
 
@@ -68,13 +73,13 @@
 
                     <div class="inline-actions">
                         {% if billing_is_pro %}
-                            <span class="ok-pill">Pro aktiv</span>
-                            <a class="btn btn-secondary" href="/settings?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}#billing-panel">Abo anzeigen</a>
+                            <span class="ok-pill">{{ t("billing.pro_active") }}</span>
+                            <a class="btn btn-secondary" href="/settings?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}&auth[lang]={{ portal_lang_code }}#billing-panel">{{ t("index.billing.subscription_view") }}</a>
                         {% elif billing_checkout_enabled %}
-                            <button id="upgrade-button" class="btn btn-primary" type="button">Upgrade auf Pro</button>
-                            <a class="btn btn-secondary" href="/settings?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}#billing-panel">Abo in Einstellungen</a>
+                            <button id="upgrade-button" class="btn btn-primary" type="button">{{ t("billing.upgrade_to_pro") }}</button>
+                            <a class="btn btn-secondary" href="/settings?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}&auth[lang]={{ portal_lang_code }}#billing-panel">{{ t("index.billing.subscription_in_settings") }}</a>
                         {% else %}
-                            <span class="pill">Upgrade aktuell nicht verfügbar</span>
+                            <span class="pill">{{ t("billing.unavailable") }}</span>
                         {% endif %}
                     </div>
                 </div>
@@ -84,7 +89,7 @@
                 <div class="panel-body stacked-gap">
                     <div class="section-head compact">
                         <div>
-                            <h2 class="panel-title">Deal-Auswahl</h2>
+                            <h2 class="panel-title">{{ t("index.section.deal_selection") }}</h2>
                         </div>
                     </div>
 
@@ -92,20 +97,21 @@
                         <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
                         <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
                         <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+                        <input type="hidden" name="auth[lang]" value="{{ portal_lang_code }}"/>
                         <input type="hidden" name="page" value="1"/>
                         <div class="grid">
-                            <label class="field-label">Pipeline
+                            <label class="field-label">{{ t("index.field.pipeline") }}
                                 <select class="input" name="category_id">
-                                    <option value="">- wählen -</option>
+                                    <option value="">{{ t("common.select_placeholder") }}</option>
                                     {% for c in categories %}
                                         <option value="{{ c.ID }}" {% if selected_category_id is not none and (c.ID|string) == (selected_category_id|string) %}selected{% endif %}>{{ c.NAME }} (ID {{ c.ID }})</option>
                                     {% endfor %}
                                 </select>
                             </label>
-                            <label class="field-label">Stage ID
-                                <input class="input" name="stage_id" value="{{ stage_id or '' }}" placeholder="Optional"/>
+                            <label class="field-label">{{ t("index.field.stage_id") }}
+                                <input class="input" name="stage_id" value="{{ stage_id or '' }}" placeholder="{{ t('common.optional') }}"/>
                             </label>
-                            <label class="field-label">Deals pro Seite
+                            <label class="field-label">{{ t("index.field.deals_per_page") }}
                                 <select class="input" name="page_size">
                                     {% for size in page_size_options %}
                                         <option value="{{ size }}" {% if size == page_size %}selected{% endif %}>{{ size }}</option>
@@ -114,25 +120,25 @@
                             </label>
                         </div>
                         <div class="inline-actions" style="margin-top:14px;">
-                            <button class="btn btn-primary" type="submit">Deals laden</button>
+                            <button class="btn btn-primary" type="submit">{{ t("index.load_deals") }}</button>
                         </div>
                     </form>
 
-                        <div class="metrics-grid">
-                            <div class="metric-card">
-                                <div class="metric-label">Seite</div>
-                                <div class="metric-value">{{ page }}</div>
-                            </div>
+                    <div class="metrics-grid">
                         <div class="metric-card">
-                            <div class="metric-label">Geladene Deals</div>
-                            <div class="metric-value">{{ loaded_deals }}</div>
-                            </div>
-                            <div class="metric-card">
-                                <div class="metric-label">Pipeline-Status</div>
-                                <div class="metric-value compact-value">{% if selected_category_id is none and not stage_id %}Nicht aktiv{% else %}Aktiv{% endif %}</div>
-                                <div class="metric-note">{% if selected_category_id is none and not stage_id %}Bitte Pipeline wählen{% else %}Filter aktiv{% endif %}</div>
-                            </div>
+                            <div class="metric-label">{{ t("index.metric.page") }}</div>
+                            <div class="metric-value">{{ page }}</div>
                         </div>
+                        <div class="metric-card">
+                            <div class="metric-label">{{ t("index.metric.loaded_deals") }}</div>
+                            <div class="metric-value">{{ loaded_deals }}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">{{ t("index.metric.pipeline_status") }}</div>
+                            <div class="metric-value compact-value">{% if selected_category_id is none and not stage_id %}{{ t("index.pipeline.inactive") }}{% else %}{{ t("index.pipeline.active") }}{% endif %}</div>
+                            <div class="metric-note">{% if selected_category_id is none and not stage_id %}{{ t("index.pipeline.select_pipeline") }}{% else %}{{ t("index.pipeline.filter_active") }}{% endif %}</div>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -140,11 +146,11 @@
                 <div class="panel-body tight">
                     <div class="inline-tools">
                         <label class="toolbar-search">
-                            <span>Suche</span>
-                            <input class="input" id="searchBox" placeholder="Titel / Name / IBAN / Mandat"/>
+                            <span>{{ t("index.search.label") }}</span>
+                            <input class="input" id="searchBox" placeholder="{{ t('index.search.placeholder') }}"/>
                         </label>
-                        <label class="toggle-chip"><input type="checkbox" id="fltEur" checked/> nur EUR</label>
-                        <label class="toggle-chip"><input type="checkbox" id="fltPos" checked/> Betrag &gt; 0</label>
+                        <label class="toggle-chip"><input type="checkbox" id="fltEur" checked/> {{ t("index.search.only_eur") }}</label>
+                        <label class="toggle-chip"><input type="checkbox" id="fltPos" checked/> {{ t("index.search.positive_only") }}</label>
                         <span class="small" id="rowInfo"></span>
                     </div>
                 </div>
@@ -154,7 +160,7 @@
                 <div class="panel-body stacked-gap">
                     <div class="section-head">
                         <div>
-                            <h2 class="panel-title">SEPA XML</h2>
+                            <h2 class="panel-title">{{ t("index.section.sepa_xml") }}</h2>
                         </div>
                     </div>
 
@@ -162,22 +168,23 @@
                         <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
                         <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
                         <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+                        <input type="hidden" name="auth[lang]" value="{{ portal_lang_code }}"/>
                         <input type="hidden" name="category_id" value="{{ selected_category_id if selected_category_id is not none else '' }}"/>
                         <input type="hidden" name="stage_id" value="{{ stage_id or '' }}"/>
                         <input type="hidden" name="page" value="{{ page }}"/>
                         <input type="hidden" name="page_size" value="{{ page_size }}"/>
 
                         <div class="grid" style="margin-bottom:14px;">
-                            <label class="field-label">Einzugsdatum
+                            <label class="field-label">{{ t("index.field.collection_date") }}
                                 <input class="input" type="date" name="exec_date" value="{{ today }}"/>
                             </label>
-                            <label class="field-label">Instrument
+                            <label class="field-label">{{ t("index.field.instrument") }}
                                 <select class="input" name="lcl_instr">
                                     <option value="CORE" {% if form_lcl_instr != 'B2B' %}selected{% endif %}>CORE</option>
                                     <option value="B2B" {% if form_lcl_instr == 'B2B' %}selected{% endif %}>B2B</option>
                                 </select>
                             </label>
-                            <label class="field-label">Sequenz
+                            <label class="field-label">{{ t("index.field.sequence") }}
                                 <select class="input" name="seq">
                                     <option value="OOFF" {% if form_seq == 'OOFF' or not form_seq %}selected{% endif %}>OOFF</option>
                                     <option value="FRST" {% if form_seq == 'FRST' %}selected{% endif %}>FRST</option>
@@ -188,7 +195,7 @@
                         </div>
 
                         <div class="inline-actions" style="margin-bottom:14px;">
-                            <button class="btn btn-primary" type="submit" {% if not deals %}disabled{% endif %}>SEPA XML erzeugen</button>
+                            <button class="btn btn-primary" type="submit" {% if not deals %}disabled{% endif %}>{{ t("index.generate_xml") }}</button>
                         </div>
 
                         <div class="table-wrap">
@@ -196,14 +203,14 @@
                                 <thead>
                                     <tr>
                                         <th><input type="checkbox" id="checkAll"/></th>
-                                        <th>ID</th>
-                                        <th>Titel</th>
-                                        <th class="num">Betrag</th>
-                                        <th>Währung</th>
-                                        <th>Debitor-Name</th>
-                                        <th>Debitor-IBAN</th>
-                                        <th>Mandat-ID</th>
-                                        <th>Status</th>
+                                        <th>{{ t("index.table.id") }}</th>
+                                        <th>{{ t("index.table.title") }}</th>
+                                        <th class="num">{{ t("index.table.amount") }}</th>
+                                        <th>{{ t("index.table.currency") }}</th>
+                                        <th>{{ t("index.table.debtor_name") }}</th>
+                                        <th>{{ t("index.table.debtor_iban") }}</th>
+                                        <th>{{ t("index.table.mandate_id") }}</th>
+                                        <th>{{ t("common.status") }}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -220,15 +227,15 @@
                                             <td>{{ mandate_id_field and d.get(mandate_id_field) or '' }}</td>
                                             <td>
                                                 {% if not mandate_id_field %}
-                                                    <span class="pill">Mandatsfeld fehlt</span>
+                                                    <span class="pill">{{ t("index.status.mandate_field_missing") }}</span>
                                                 {% elif not (mandate_id_field and d.get(mandate_id_field)) %}
-                                                    <span class="pill">Mandats-ID fehlt</span>
+                                                    <span class="pill">{{ t("index.status.mandate_id_missing") }}</span>
                                                 {% elif not (dm and dm.iban) %}
-                                                    <span class="pill">IBAN fehlt</span>
+                                                    <span class="pill">{{ t("index.status.iban_missing") }}</span>
                                                 {% elif dm and dm.iban and not (dm.iban|upper|replace(' ', '')|regex_match('^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$')) %}
-                                                    <span class="pill">IBAN-Format unklar</span>
+                                                    <span class="pill">{{ t("index.status.iban_format_unclear") }}</span>
                                                 {% else %}
-                                                    <span class="ok-pill">Bereit</span>
+                                                    <span class="ok-pill">{{ t("common.ready") }}</span>
                                                 {% endif %}
                                             </td>
                                         </tr>
@@ -238,14 +245,13 @@
                             {% if not deals %}
                                 <div class="empty">
                                     {% if selected_category_id is not none or stage_id %}
-                                        Keine Deals für die aktuelle Auswahl gefunden.
+                                        {{ t("index.empty.no_deals") }}
                                     {% else %}
-                                        Bitte zuerst eine Pipeline wählen.
+                                        {{ t("index.empty.select_pipeline") }}
                                     {% endif %}
                                 </div>
                             {% endif %}
                         </div>
-
                     </form>
                 </div>
             </section>
@@ -257,20 +263,22 @@
                             <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
                             <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
                             <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+                            <input type="hidden" name="auth[lang]" value="{{ portal_lang_code }}"/>
                             <input type="hidden" name="category_id" value="{{ selected_category_id if selected_category_id is not none else '' }}"/>
                             <input type="hidden" name="stage_id" value="{{ stage_id or '' }}"/>
                             <input type="hidden" name="page_size" value="{{ page_size }}"/>
-                            <button class="btn btn-secondary btn-icon" type="submit" name="page" value="{{ page - 1 }}" {% if not has_prev %}disabled{% endif %} aria-label="Vorherige Seite">&#8249;</button>
+                            <button class="btn btn-secondary btn-icon" type="submit" name="page" value="{{ page - 1 }}" {% if not has_prev %}disabled{% endif %} aria-label="{{ t('common.previous_page') }}">&#8249;</button>
                         </form>
-                        <span class="page-indicator">Seite {{ page }}</span>
+                        <span class="page-indicator">{{ t("common.page") }} {{ page }}</span>
                         <form class="inline-form" method="get" action="/">
                             <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
                             <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
                             <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+                            <input type="hidden" name="auth[lang]" value="{{ portal_lang_code }}"/>
                             <input type="hidden" name="category_id" value="{{ selected_category_id if selected_category_id is not none else '' }}"/>
                             <input type="hidden" name="stage_id" value="{{ stage_id or '' }}"/>
                             <input type="hidden" name="page_size" value="{{ page_size }}"/>
-                            <button class="btn btn-secondary btn-icon" type="submit" name="page" value="{{ page + 1 }}" {% if not has_next %}disabled{% endif %} aria-label="Nächste Seite">&#8250;</button>
+                            <button class="btn btn-secondary btn-icon" type="submit" name="page" value="{{ page + 1 }}" {% if not has_next %}disabled{% endif %} aria-label="{{ t('common.next_page') }}">&#8250;</button>
                         </form>
                     </div>
                 </div>
@@ -278,7 +286,7 @@
         </div>
 
         <script src="https://api.bitrix24.com/api/v1/"></script>
-        <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260323e') }}"></script>
+        <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260408a') }}"></script>
         <script>
         (function(){
             const table = document.getElementById("dealTable");
@@ -294,6 +302,17 @@
             const memberId = {{ billing_member_id|tojson }};
             const accessToken = {{ access_token|tojson }};
             const domain = {{ domain|tojson }};
+            const portalLangCode = {{ portal_lang_code|tojson }};
+            const rowInfoTemplate = {{ t("index.search.results")|tojson }};
+            const checkoutStartingText = {{ t("billing.checkout.starting")|tojson }};
+            const checkoutStartFailedText = {{ t("billing.checkout.start_failed")|tojson }};
+            const checkoutRedirectMissingText = {{ t("billing.checkout.redirect_missing")|tojson }};
+
+            function formatRowInfo(visible, total){
+                return rowInfoTemplate
+                    .replace("{visible}", String(visible))
+                    .replace("{total}", String(total));
+            }
 
             function matchesFilters(tr){
                 const q = (searchBox.value || "").toLowerCase().trim();
@@ -328,7 +347,7 @@
                 rows.forEach((row) => {
                     row.style.display = matchesFilters(row) ? "" : "none";
                 });
-                rowInfo.textContent = `${visible.length} von ${rows.length} Deals sichtbar`;
+                rowInfo.textContent = formatRowInfo(visible.length, rows.length);
                 checkAll.disabled = visible.length === 0;
                 syncCheckState();
             }
@@ -365,11 +384,12 @@
                     }
 
                     upgradeButton.disabled = true;
-                    upgradeButton.textContent = "Checkout wird gestartet...";
+                    upgradeButton.textContent = checkoutStartingText;
 
                     if (memberId) body.set("auth[member_id]", memberId);
                     if (accessToken) body.set("auth[access_token]", accessToken);
                     if (domain) body.set("auth[domain]", domain);
+                    if (portalLangCode) body.set("auth[lang]", portalLangCode);
 
                     fetch("/create-checkout-session", {
                         method: "POST",
@@ -380,13 +400,13 @@
                     })
                         .then((response) => response.json().catch(() => ({})).then((data) => {
                             if (!response.ok) {
-                                throw new Error(data.error || "Stripe Checkout konnte nicht gestartet werden.");
+                                throw new Error(data.error || checkoutStartFailedText);
                             }
                             return data;
                         }))
                         .then((data) => {
                             if (!data.url) {
-                                throw new Error("Stripe Checkout hat keine Weiterleitungs-URL geliefert.");
+                                throw new Error(checkoutRedirectMissingText);
                             }
 
                             try {
@@ -401,7 +421,7 @@
                             window.location.href = data.url;
                         })
                         .catch((error) => {
-                            showCheckoutError(error.message || "Stripe Checkout konnte nicht gestartet werden.");
+                            showCheckoutError(error.message || checkoutStartFailedText);
                             upgradeButton.disabled = false;
                             upgradeButton.textContent = previousText;
                         });

@@ -214,6 +214,7 @@ def get_auth_from_request(req) -> dict:
         "user_id": req.values.get("auth[user_id]") or req.values.get("USER_ID"),
         "refresh_token": req.values.get("auth[refresh_token]") or req.values.get("REFRESH_ID"),
         "expires": req.values.get("auth[expires]") or req.values.get("expires"),
+        "lang": req.values.get("auth[lang]") or req.values.get("app_lang") or req.values.get("lang"),
     }
     if not auth["access_token"] or not auth["domain"]:
         raise RuntimeError("Fehlende auth-Parameter: access_token/domain")

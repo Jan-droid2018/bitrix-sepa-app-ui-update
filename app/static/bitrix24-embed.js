@@ -108,7 +108,69 @@
         });
     }
 
+    function normalizeLang(value) {
+        var normalized = String(value || "").toLowerCase().replace("_", "-");
+        if (normalized.indexOf("en") === 0) {
+            return "en";
+        }
+        return "de";
+    }
+
+    function updateLanguageInputs(rawPortalLang) {
+        Array.prototype.forEach.call(document.querySelectorAll('input[name="auth[lang]"]'), function (input) {
+            input.value = rawPortalLang || normalizeLang(rawPortalLang);
+        });
+    }
+
+    function syncPortalLanguage() {
+        var body = document.body;
+        if (!body || !window.BX24 || typeof BX24.init !== "function" || typeof BX24.getLang !== "function") {
+            return;
+        }
+
+        var currentAppLang = normalizeLang(body.getAttribute("data-app-lang"));
+        var languageMode = String(body.getAttribute("data-language-mode") || "auto").toLowerCase();
+
+        BX24.init(function () {
+            var rawPortalLang = "";
+
+            try {
+                rawPortalLang = BX24.getLang() || "";
+            } catch (error) {
+                console.debug("BX24.getLang unavailable", error);
+                return;
+            }
+
+            if (!rawPortalLang) {
+                return;
+            }
+
+            updateLanguageInputs(rawPortalLang);
+
+            if (body.classList.contains("auth-bootstrap")) {
+                return;
+            }
+
+            if (languageMode !== "auto") {
+                return;
+            }
+
+            if (normalizeLang(rawPortalLang) === currentAppLang) {
+                return;
+            }
+
+            try {
+                var url = new URL(window.location.href);
+                url.searchParams.set("app_lang", rawPortalLang);
+                window.location.replace(url.toString());
+            } catch (error) {
+                console.debug("Portal language sync skipped", error);
+            }
+        });
+    }
+
     document.addEventListener("DOMContentLoaded", scheduleFit);
+    document.addEventListener("DOMContentLoaded", syncPortalLanguage);
     window.addEventListener("load", scheduleFit);
     window.addEventListener("resize", scheduleFit);
 

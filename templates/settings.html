@@ -1,15 +1,15 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ app_lang }}">
     <head>
         <meta charset="utf-8"/>
         <meta name="viewport" content="width=device-width,initial-scale=1"/>
-        <title>SEPA Einstellungen</title>
+        <title>{{ t("settings.title") }}</title>
         <link rel="preconnect" href="https://fonts.googleapis.com"/>
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
         <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
         <link rel="stylesheet" href="{{ url_for('static', filename='bitrix24-app.css', v='20260323k') }}"/>
     </head>
-    <body class="bitrix-app">
+    <body class="bitrix-app" data-app-lang="{{ app_lang }}" data-language-mode="{{ language_mode }}">
         <div class="page-shell compact-shell">
             <section class="workspace-shell">
                 <div class="workspace-inner">
@@ -18,16 +18,17 @@
                     </div>
                     <div class="workspace-head centered-head">
                         <div>
-                            <h1 class="workspace-title brand-title">SEPA Einstellungen</h1>
+                            <h1 class="workspace-title brand-title">{{ t("settings.heading") }}</h1>
                         </div>
                     </div>
                     <div class="workspace-action-row">
                         <div class="bitrix-tabs centered-tabs">
-                            <a class="bitrix-tab" href="/?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}">Exportzentrum</a>
-                            <span class="bitrix-tab active">Einstellungen</span>
+                            <a class="bitrix-tab" href="/?auth[access_token]={{ access_token }}&auth[domain]={{ domain }}&auth[member_id]={{ member_id }}&auth[lang]={{ portal_lang_code }}">{{ t("settings.tab.export") }}</a>
+                            <span class="bitrix-tab active">{{ t("settings.tab.settings") }}</span>
                         </div>
-                        <div class="hero-actions centered-actions">
-                            <button class="btn btn-primary" type="submit" form="settings-form">Speichern</button>
+                        <div class="workspace-corner-actions">
+                            {% include "_language_switch.html" %}
+                            <button class="btn btn-primary" type="submit" form="settings-form">{{ t("common.save") }}</button>
                         </div>
                     </div>
                 </div>
@@ -46,26 +47,26 @@
                 <div class="panel-body stacked-gap">
                     <div class="section-head compact">
                         <div>
-                            <h2 class="panel-title">Plan & Upgrade</h2>
-                            <p>Hier kannst du den aktuellen Tarif sehen und direkt Stripe Checkout starten.</p>
+                            <h2 class="panel-title">{{ t("billing.title") }}</h2>
+                            <p>{{ t("settings.billing.subtitle") }}</p>
                         </div>
                     </div>
 
                     <div class="metrics-grid">
                         <div class="metric-card {% if billing_is_pro %}status-card{% elif billing_limit_reached %}status-card error{% endif %}">
-                            <div class="metric-label">Aktueller Plan</div>
+                            <div class="metric-label">{{ t("billing.current_plan") }}</div>
                             <div class="metric-value compact-value">{{ billing_plan_label }}</div>
                             <div class="metric-note">{{ billing_status_text }}</div>
                         </div>
                         <div class="metric-card">
-                            <div class="metric-label">Nutzung</div>
-                            <div class="metric-value compact-value">{% if billing_is_pro %}Unbegrenzt{% else %}{{ billing_exports_used }}/1{% endif %}</div>
+                            <div class="metric-label">{{ t("billing.usage") }}</div>
+                            <div class="metric-value compact-value">{% if billing_is_pro %}{{ t("billing.limit.unlimited") }}{% else %}{{ billing_exports_used }}/1{% endif %}</div>
                             <div class="metric-note">{{ billing_usage_text }}</div>
                         </div>
                         <div class="metric-card">
-                            <div class="metric-label">Abrechnung</div>
+                            <div class="metric-label">{{ t("billing.accounting") }}</div>
                             <div class="metric-value compact-value">{{ billing_exports_limit_text }}</div>
-                            <div class="metric-note">Bitrix Member-ID: {{ billing_member_id or 'nicht verfügbar' }}</div>
+                            <div class="metric-note">{{ t("billing.member_id_label") }}: {{ billing_member_id or t("billing.member_id_unavailable") }}</div>
                         </div>
                     </div>
 
@@ -73,13 +74,13 @@
 
                     <div class="inline-actions">
                         {% if billing_is_pro %}
-                            <span class="ok-pill">Pro aktiv</span>
+                            <span class="ok-pill">{{ t("billing.pro_active") }}</span>
                         {% elif billing_checkout_enabled %}
-                            <button id="upgrade-button" class="btn btn-primary" type="button">Upgrade auf Pro</button>
-                            <span class="small">Startet Stripe Checkout für dieses Bitrix24-Mitglied.</span>
+                            <button id="upgrade-button" class="btn btn-primary" type="button">{{ t("billing.upgrade_to_pro") }}</button>
+                            <span class="small">{{ t("settings.billing.checkout_for_member") }}</span>
                         {% else %}
-                            <span class="pill">Upgrade aktuell nicht verfügbar</span>
-                            <span class="small">Sobald `member_id` vorliegt, kann Checkout gestartet werden.</span>
+                            <span class="pill">{{ t("billing.unavailable") }}</span>
+                            <span class="small">{{ t("settings.billing.await_member_id") }}</span>
                         {% endif %}
                     </div>
                 </div>
@@ -87,8 +88,8 @@
 
             <div id="auto-detect-progress" class="progress-overlay" hidden aria-hidden="true">
                 <div class="progress-card" role="status" aria-live="polite">
-                    <div class="progress-title">Auto-Erkennung läuft</div>
-                    <div class="progress-copy">Vorhandene Felder werden gesucht und fehlende Felder bei Bedarf angelegt.</div>
+                    <div class="progress-title">{{ t("settings.autodetect.progress.title") }}</div>
+                    <div class="progress-copy">{{ t("settings.autodetect.progress.body") }}</div>
                     <div class="progress-bar" aria-hidden="true">
                         <div class="progress-bar-fill"></div>
                     </div>
@@ -99,38 +100,39 @@
                 <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
                 <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
                 <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+                <input type="hidden" name="auth[lang]" value="{{ portal_lang_code }}"/>
 
                 <section class="panel">
                     <div class="panel-body stacked-gap">
                         <div class="section-head compact">
                             <div>
-                                <h2 class="panel-title">Deal-Felder</h2>
+                                <h2 class="panel-title">{{ t("settings.section.deal_fields") }}</h2>
                             </div>
                         </div>
 
                         <div class="grid">
                             <label class="field-label">
-                                <span>Debitor-Name (optional)</span>
+                                <span>{{ t("settings.field.debtor_name_optional") }}</span>
                                 <select class="input" name="field_name">
-                                    <option value="">- auswählen -</option>
+                                    <option value="">{{ t("common.select_placeholder") }}</option>
                                     {% for u in deal_uf_codes %}
                                         <option value="{{ u.code }}" {% if field_name == u.code %}selected{% endif %}>{{ u.label }} ({{ u.code }})</option>
                                     {% endfor %}
                                 </select>
                             </label>
                             <label class="field-label">
-                                <span>Mandat-ID</span>
+                                <span>{{ t("settings.field.mandate_id") }}</span>
                                 <select class="input" name="field_mand_id">
-                                    <option value="">- auswählen -</option>
+                                    <option value="">{{ t("common.select_placeholder") }}</option>
                                     {% for u in deal_uf_codes %}
                                         <option value="{{ u.code }}" {% if field_mand_id == u.code %}selected{% endif %}>{{ u.label }} ({{ u.code }})</option>
                                     {% endfor %}
                                 </select>
                             </label>
                             <label class="field-label">
-                                <span>Mandat-Datum</span>
+                                <span>{{ t("settings.field.mandate_date") }}</span>
                                 <select class="input" name="field_mand_date">
-                                    <option value="">- auswählen -</option>
+                                    <option value="">{{ t("common.select_placeholder") }}</option>
                                     {% for u in deal_uf_codes %}
                                         <option value="{{ u.code }}" {% if field_mand_date == u.code %}selected{% endif %}>{{ u.label }} ({{ u.code }})</option>
                                     {% endfor %}
@@ -139,7 +141,7 @@
                         </div>
 
                         <div class="inline-actions">
-                            <button id="auto-detect-button" class="btn btn-primary" type="submit" form="settings-form" formaction="/debug_detect_mandate_fields" formmethod="post" formnovalidate>Auto-Erkennung &amp; Felder anlegen</button>
+                            <button id="auto-detect-button" class="btn btn-primary" type="submit" form="settings-form" formaction="/debug_detect_mandate_fields" formmethod="post" formnovalidate>{{ t("settings.autodetect.button") }}</button>
                         </div>
                     </div>
                 </section>
@@ -148,15 +150,15 @@
                     <div class="panel-body stacked-gap">
                         <div class="section-head compact">
                             <div>
-                                <h2 class="panel-title">Kontakt</h2>
+                                <h2 class="panel-title">{{ t("settings.section.contact") }}</h2>
                             </div>
                         </div>
 
                         <div class="grid">
                             <label class="field-label">
-                                <span>Kontakt-IBAN</span>
+                                <span>{{ t("settings.field.contact_iban") }}</span>
                                 <select class="input" name="field_contact_iban">
-                                    <option value="">- auswählen -</option>
+                                    <option value="">{{ t("common.select_placeholder") }}</option>
                                     {% for u in contact_uf_codes %}
                                         <option value="{{ u.code }}" {% if field_contact_iban == u.code %}selected{% endif %}>{{ u.label }} ({{ u.code }})</option>
                                     {% endfor %}
@@ -170,25 +172,25 @@
                     <div class="panel-body stacked-gap">
                         <div class="section-head compact">
                             <div>
-                                <h2 class="panel-title">Gläubigerdaten</h2>
+                                <h2 class="panel-title">{{ t("settings.section.creditor_details") }}</h2>
                             </div>
                         </div>
 
                         <div class="grid">
                             <label class="field-label">
-                                <span>Gläubiger</span>
+                                <span>{{ t("settings.field.creditor_name") }}</span>
                                 <input class="input" name="creditor_name" value="{{ creditor_name or '' }}" required/>
                             </label>
                             <label class="field-label">
-                                <span>Gläubiger-IBAN</span>
+                                <span>{{ t("settings.field.creditor_iban") }}</span>
                                 <input class="input" name="creditor_iban" value="{{ creditor_iban or '' }}" required/>
                             </label>
                             <label class="field-label">
-                                <span>Gläubiger-BIC</span>
+                                <span>{{ t("settings.field.creditor_bic") }}</span>
                                 <input class="input" name="creditor_bic" value="{{ creditor_bic or '' }}" required/>
                             </label>
                             <label class="field-label">
-                                <span>Creditor Identifier (CI)</span>
+                                <span>{{ t("settings.field.creditor_ci") }}</span>
                                 <input class="input" name="creditor_ci" value="{{ creditor_ci or '' }}" required/>
                             </label>
                         </div>
@@ -198,7 +200,7 @@
         </div>
 
         <script src="https://api.bitrix24.com/api/v1/"></script>
-        <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260323e') }}"></script>
+        <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260408a') }}"></script>
         <script>
             (function () {
                 var form = document.getElementById("settings-form");
@@ -209,6 +211,11 @@
                 var memberId = {{ billing_member_id|tojson }};
                 var accessToken = {{ access_token|tojson }};
                 var domain = {{ domain|tojson }};
+                var portalLangCode = {{ portal_lang_code|tojson }};
+                var autoDetectRunningText = {{ t("settings.autodetect.running")|tojson }};
+                var checkoutStartingText = {{ t("billing.checkout.starting")|tojson }};
+                var checkoutStartFailedText = {{ t("billing.checkout.start_failed")|tojson }};
+                var checkoutRedirectMissingText = {{ t("billing.checkout.redirect_missing")|tojson }};
 
                 if (!form || !progress || !autoDetectButton) {
                     return;
@@ -239,7 +246,7 @@
                     document.body.classList.add("is-busy");
                     form.setAttribute("aria-busy", "true");
                     submitter.disabled = true;
-                    submitter.textContent = "Auto-Erkennung läuft...";
+                    submitter.textContent = autoDetectRunningText;
                 });
 
                 if (upgradeButton) {
@@ -253,7 +260,7 @@
                         }
 
                         upgradeButton.disabled = true;
-                        upgradeButton.textContent = "Checkout wird gestartet...";
+                        upgradeButton.textContent = checkoutStartingText;
 
                         if (memberId) {
                             body.set("auth[member_id]", memberId);
@@ -263,6 +270,9 @@
                         }
                         if (domain) {
                             body.set("auth[domain]", domain);
+                        }
+                        if (portalLangCode) {
+                            body.set("auth[lang]", portalLangCode);
                         }
 
                         fetch("/create-checkout-session", {
@@ -277,14 +287,14 @@
                                     return {};
                                 }).then(function (data) {
                                     if (!response.ok) {
-                                        throw new Error(data.error || "Stripe Checkout konnte nicht gestartet werden.");
+                                        throw new Error(data.error || checkoutStartFailedText);
                                     }
                                     return data;
                                 });
                             })
                             .then(function (data) {
                                 if (!data.url) {
-                                    throw new Error("Stripe Checkout hat keine Weiterleitungs-URL geliefert.");
+                                    throw new Error(checkoutRedirectMissingText);
                                 }
 
                                 try {
@@ -299,7 +309,7 @@
                                 window.location.href = data.url;
                             })
                             .catch(function (error) {
-                                showCheckoutError(error.message || "Stripe Checkout konnte nicht gestartet werden.");
+                                showCheckoutError(error.message || checkoutStartFailedText);
                                 upgradeButton.disabled = false;
                                 upgradeButton.textContent = previousText;
                             });

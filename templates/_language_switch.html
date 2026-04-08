@@ -1,0 +1,15 @@
+<div class="language-switch" aria-label="{{ t('language.label') }}">
+    <div class="language-switch-actions">
+        {% for option in language_options %}
+            <form class="language-switch-form" method="post" action="/set-language">
+                <input type="hidden" name="auth[access_token]" value="{{ access_token }}"/>
+                <input type="hidden" name="auth[domain]" value="{{ domain }}"/>
+                <input type="hidden" name="auth[member_id]" value="{{ member_id }}"/>
+                <input type="hidden" name="auth[lang]" value="{{ portal_lang_code }}"/>
+                <input type="hidden" name="next" value="{{ language_next }}"/>
+                <input type="hidden" name="ui_lang" value="{{ option.value }}"/>
+                <button class="language-switch-button{% if language_mode == option.value %} active{% endif %}" type="submit">{{ option.label }}</button>
+            </form>
+        {% endfor %}
+    </div>
+</div>

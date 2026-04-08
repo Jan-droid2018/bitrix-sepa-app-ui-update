@@ -127,7 +127,7 @@ class BillingRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn("Upgrade auf Pro", body)
-        self.assertIn("Plan & Upgrade", body)
+        self.assertIn("Plan &amp; Upgrade", body)
 
     def test_settings_shows_pro_status_when_subscription_is_active(self):
         self._set_session_auth()
@@ -162,6 +162,32 @@ class BillingRouteTests(unittest.TestCase):
         self.assertEqual(kwargs["mode"], "subscription")
         self.assertEqual(kwargs["metadata"]["member_id"], "member-1")
         self.assertEqual(kwargs["subscription_data"]["metadata"]["member_id"], "member-1")
+
+    def test_create_checkout_session_uses_manual_ui_language_for_return_page(self):
+        fake_session = Mock(id="cs_123", url="https://checkout.stripe.test/session")
+        fake_checkout = Mock()
+        fake_checkout.Session.create.return_value = fake_session
+        fake_stripe = Mock(checkout=fake_checkout)
+
+        with self.client.session_transaction() as sess:
+            sess["token"] = "session-token"
+            sess["domain"] = "example.bitrix24.de"
+            sess["member_id"] = "member-1"
+            sess["app_lang_override"] = "en"
+            sess["app_lang"] = "en"
+            sess["portal_lang_code"] = "de"
+
+        with patch("app.routes.routes._get_stripe_api", return_value=fake_stripe), \
+             patch.dict(os.environ, {"STRIPE_PRICE_ID": "price_123"}, clear=False):
+            response = self.client.post(
+                "/create-checkout-session",
+                data={"auth[member_id]": "member-1", "auth[lang]": "de"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        kwargs = fake_checkout.Session.create.call_args.kwargs
+        self.assertIn("app_lang=en", kwargs["success_url"])
+        self.assertIn("app_lang=en", kwargs["cancel_url"])
 
     def test_webhook_checkout_completed_sets_pro_plan(self):
         event = {

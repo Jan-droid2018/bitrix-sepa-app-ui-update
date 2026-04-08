@@ -1,5 +1,6 @@
 import unicodedata
 
+from app.i18n import normalize_language, translate
 from app.services.bitrix_helper import b24_batch, b24_call, b24_call_raw, b24_list_all, _chunk
 
 SEPA_USERFIELD_SPECS = {
@@ -39,6 +40,13 @@ SEPA_USERFIELD_SPECS = {
         "user_type_id": "string",
         "help": "Automatisch von der SEPA-App angelegt.",
     },
+}
+
+USERFIELD_TRANSLATION_KEYS = {
+    "DEBTOR_NAME": "userfield.debtor_name",
+    "MANDATE_ID": "userfield.mandate_id",
+    "MANDATE_DATE": "userfield.mandate_date",
+    "CONTACT_IBAN": "userfield.contact_iban",
 }
 
 # =========================
@@ -92,6 +100,23 @@ def _spec_for(logical_name: str) -> dict:
         raise KeyError(f"Unbekannte SEPA-Felddefinition: {logical_name}") from exc
 
 
+def _userfield_translation_key(logical_name: str) -> str:
+    try:
+        return USERFIELD_TRANSLATION_KEYS[logical_name]
+    except KeyError as exc:
+        raise KeyError(f"Unbekannte SEPA-Felddefinition: {logical_name}") from exc
+
+
+def get_sepa_userfield_label(logical_name: str, language: str = "de") -> str:
+    lang = normalize_language(language)
+    return translate(lang, f"{_userfield_translation_key(logical_name)}.label")
+
+
+def get_sepa_userfield_help(logical_name: str, language: str = "de") -> str:
+    lang = normalize_language(language)
+    return translate(lang, f"{_userfield_translation_key(logical_name)}.help")
+
+
 def _norm_token(value) -> str:
     return str(value or "").strip().upper()
 
@@ -110,7 +135,14 @@ def find_userfield_by_spec(userfields: list[dict], logical_name: str) -> dict | 
     return None
 
 
-def ensure_sepa_userfield(domain: str, access_token: str, logical_name: str, userfields: list[dict] | None = None):
+def ensure_sepa_userfield(
+    domain: str,
+    access_token: str,
+    logical_name: str,
+    userfields: list[dict] | None = None,
+    *,
+    language: str = "de",
+):
     spec = _spec_for(logical_name)
     current_userfields = list(userfields or [])
 
@@ -118,14 +150,17 @@ def ensure_sepa_userfield(domain: str, access_token: str, logical_name: str, use
     if existing:
         return existing, False, current_userfields
 
+    localized_label = get_sepa_userfield_label(logical_name, language)
+    localized_help = get_sepa_userfield_help(logical_name, language)
+
     fields_payload = {
         "FIELD_NAME": spec["field_name"],
         "XML_ID": spec["xml_id"],
         "USER_TYPE_ID": spec["user_type_id"],
-        "EDIT_FORM_LABEL": spec["label"],
-        "LIST_COLUMN_LABEL": spec["label"],
-        "LIST_FILTER_LABEL": spec["label"],
-        "HELP_MESSAGE": spec["help"],
+        "EDIT_FORM_LABEL": localized_label,
+        "LIST_COLUMN_LABEL": localized_label,
+        "LIST_FILTER_LABEL": localized_label,
+        "HELP_MESSAGE": localized_help,
         "MULTIPLE": "N",
         "MANDATORY": "N",
         "SHOW_FILTER": "Y",

@@ -1,15 +1,15 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ app_lang }}">
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width,initial-scale=1"/>
-    <title>Bitrix24 Autorisierung</title>
+    <title>{{ t("auth.title") }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com"/>
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
     <link rel="stylesheet" href="{{ url_for('static', filename='bitrix24-app.css', v='20260323k') }}"/>
 </head>
-<body class="bitrix-app">
+<body class="bitrix-app auth-bootstrap" data-app-lang="{{ app_lang }}" data-language-mode="{{ language_mode }}">
     <div class="page-shell narrow-shell">
         <section class="workspace-shell">
             <div class="workspace-inner">
@@ -18,11 +18,11 @@
                 </div>
                 <div class="workspace-head centered-head">
                     <div>
-                        <h1 class="workspace-title">Bitrix24 Verbindung</h1>
+                        <h1 class="workspace-title">{{ t("auth.heading") }}</h1>
                     </div>
                 </div>
                 <div class="bitrix-tabs centered-tabs">
-                    <span class="bitrix-tab active">Autorisierung</span>
+                    <span class="bitrix-tab active">{{ t("auth.tab") }}</span>
                 </div>
             </div>
         </section>
@@ -30,9 +30,9 @@
         <section class="panel">
             <div class="panel-body">
                 <div class="metric-card status-card" id="statusCard">
-                    <div class="metric-label">Status</div>
-                    <div class="metric-value" id="statusTitle">Verbindung wird vorbereitet</div>
-                    <div class="metric-note status-copy" id="statusText">Auth-Daten werden aus Bitrix24 geladen...</div>
+                    <div class="metric-label">{{ t("auth.status_label") }}</div>
+                    <div class="metric-value" id="statusTitle">{{ t("auth.status.preparing.title") }}</div>
+                    <div class="metric-note status-copy" id="statusText">{{ t("auth.status.preparing.body") }}</div>
                 </div>
             </div>
         </section>
@@ -41,7 +41,7 @@
     <form id="authform" method="post" action="/"></form>
 
     <script src="https://api.bitrix24.com/api/v1/"></script>
-    <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260323e') }}"></script>
+    <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260408a') }}"></script>
     <script>
     (function () {
         const TIMEOUT_MS = 3000;
@@ -49,22 +49,21 @@
         const statusCard = document.getElementById("statusCard");
         const statusTitle = document.getElementById("statusTitle");
         const statusText = document.getElementById("statusText");
+        const authUnavailableText = {{ t("auth.status.error.body")|tojson }};
 
         function showError(msg) {
             if (finished) return;
             finished = true;
             statusCard.classList.add("error");
-            statusTitle.textContent = "Autorisierung nicht möglich";
-            statusText.innerHTML =
-                msg + "<br><br>" +
-                "Diese Anwendung kann nur aus Bitrix24 heraus geöffnet werden.";
+            statusTitle.textContent = {{ t("auth.status.error.title")|tojson }};
+            statusText.innerHTML = msg + "<br><br>" + authUnavailableText;
         }
 
-        function submitAuth(auth) {
+        function submitAuth(auth, portalLang) {
             if (finished) return;
             finished = true;
-            statusTitle.textContent = "Bitrix24 Kontext erkannt";
-            statusText.textContent = "Die App wird jetzt mit dem gültigen OAuth-Kontext gestartet...";
+            statusTitle.textContent = {{ t("auth.status.context_detected.title")|tojson }};
+            statusText.textContent = {{ t("auth.status.context_detected.body")|tojson }};
 
             const form = document.getElementById("authform");
 
@@ -82,38 +81,46 @@
                 add("auth[domain]", BX24.getDomain());
             }
 
+            if (portalLang) {
+                add("auth[lang]", portalLang);
+            }
+
             form.submit();
         }
 
         if (!window.BX24 || !BX24.init) {
-            showError("BX24 API ist nicht verfügbar.");
+            showError({{ t("auth.error.bx24_unavailable")|tojson }});
             return;
         }
 
-        statusTitle.textContent = "Bitrix24 wird initialisiert";
-        statusText.textContent = "Die App wartet auf den OAuth-Kontext aus dem Portal.";
+        statusTitle.textContent = {{ t("auth.status.initializing.title")|tojson }};
+        statusText.textContent = {{ t("auth.status.initializing.body")|tojson }};
 
         const timer = setTimeout(function () {
-            showError("Timeout beim Initialisieren von Bitrix24.");
+            showError({{ t("auth.error.timeout")|tojson }});
         }, TIMEOUT_MS);
 
         BX24.init(function () {
             clearTimeout(timer);
 
             let auth;
+            let portalLang = "";
             try {
                 auth = BX24.getAuth();
+                if (typeof BX24.getLang === "function") {
+                    portalLang = BX24.getLang() || "";
+                }
             } catch (error) {
-                showError("Fehler beim Lesen der Auth-Daten.");
+                showError({{ t("auth.error.auth_read")|tojson }});
                 return;
             }
 
             if (!auth || !auth.access_token) {
-                showError("Kein gültiger OAuth-Kontext gefunden.");
+                showError({{ t("auth.error.no_oauth")|tojson }});
                 return;
             }
 
-            submitAuth(auth);
+            submitAuth(auth, portalLang);
         });
     })();
     </script>

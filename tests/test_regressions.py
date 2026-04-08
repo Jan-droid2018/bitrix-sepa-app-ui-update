@@ -135,6 +135,24 @@ class UserfieldProvisioningTests(unittest.TestCase):
         self.assertEqual(refreshed, [created_field])
         mocked_call.assert_called_once()
 
+    def test_ensure_sepa_userfield_uses_english_labels_when_requested(self):
+        with patch("app.domain.userfields.b24_call") as mocked_call, \
+             patch("app.domain.userfields.get_deal_userfields", return_value=[{
+                 "FIELD_NAME": "UF_CRM_SEPA_MANDATE_ID",
+                 "XML_ID": "SEPA_MANDATE_ID",
+             }]):
+            ensure_sepa_userfield(
+                "example.bitrix24.de",
+                "token-1",
+                "MANDATE_ID",
+                userfields=[],
+                language="en",
+            )
+
+        payload = mocked_call.call_args.args[3]["fields"]
+        self.assertEqual(payload["EDIT_FORM_LABEL"], "SEPA Mandate ID")
+        self.assertEqual(payload["HELP_MESSAGE"], "Created automatically by the SEPA app.")
+
 
 class UserfieldDetectionTests(unittest.TestCase):
     def test_detect_logical_userfield_handles_synonyms_without_confusing_date_and_id(self):
@@ -219,13 +237,27 @@ class RouteTests(unittest.TestCase):
             sess["member_id"] = "member-1"
 
     def test_index_keeps_auth_context_in_rendered_forms(self):
-        with patch("app.routes.routes._load_categories", return_value=[{"ID": "0", "NAME": "Sales"}]):
+        with patch("app.routes.routes.app_opt_get", return_value=""), \
+             patch("app.routes.routes._load_categories", return_value=[{"ID": "0", "NAME": "Sales"}]):
             response = self.client.get("/?auth[access_token]=token123&auth[domain]=example.bitrix24.de&auth[member_id]=member-1")
 
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn('value="token123"', body)
         self.assertIn("Bitte Pipeline wählen", body)
+
+    def test_index_renders_in_english_when_portal_language_is_english(self):
+        with patch("app.routes.routes.app_opt_get", return_value=""), \
+             patch("app.routes.routes._load_categories", return_value=[{"ID": "0", "NAME": "Sales"}]):
+            response = self.client.get(
+                "/?auth[access_token]=token123&auth[domain]=example.bitrix24.de&auth[member_id]=member-1&auth[lang]=en"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Export Center", body)
+        self.assertIn("Please select a pipeline", body)
+        self.assertIn('name="auth[lang]" value="en"', body)
 
     def test_settings_renders_contact_field_options(self):
         self._set_session_auth()
@@ -250,6 +282,120 @@ class RouteTests(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertIn("UF_CRM_DEAL_MANDATE", body)
         self.assertIn("UF_CRM_CONTACT_IBAN", body)
+
+    def test_settings_renders_in_english_when_portal_language_is_english(self):
+        self._set_session_auth()
+
+        with patch("app.routes.routes.app_opt_get", return_value=""), \
+             patch("app.routes.routes.get_deal_userfields", return_value=[]), \
+             patch("app.routes.routes.list_contact_userfields", return_value=[]):
+            response = self.client.get("/settings?auth[lang]=en")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("SEPA Settings", body)
+        self.assertIn("Upgrade to Pro", body)
+        self.assertIn("Creditor details", body)
+
+    def test_settings_renders_language_switch(self):
+        self._set_session_auth()
+
+        with patch("app.routes.routes.app_opt_get", return_value=""), \
+             patch("app.routes.routes.get_deal_userfields", return_value=[]), \
+             patch("app.routes.routes.list_contact_userfields", return_value=[]):
+            response = self.client.get("/settings?auth[lang]=en")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn('data-language-mode="auto"', body)
+        self.assertIn('action="/set-language"', body)
+        self.assertIn("App language", body)
+        self.assertIn('name="ui_lang" value="auto"', body)
+        self.assertIn('name="ui_lang" value="de"', body)
+        self.assertIn('name="ui_lang" value="en"', body)
+
+    def test_manual_language_override_keeps_ui_language(self):
+        self._set_session_auth()
+
+        with patch("app.routes.routes.app_opt_set") as mocked_set:
+            response = self.client.post(
+                "/set-language",
+                data={
+                    "ui_lang": "en",
+                    "next": "/settings",
+                    "auth[lang]": "de",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(urlparse(response.headers["Location"]).path, "/settings")
+        mocked_set.assert_called_with("example.bitrix24.de", "session-token", "UI_LANGUAGE_OVERRIDE", "EN")
+
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess["app_lang_override"], "en")
+            self.assertEqual(sess["app_lang"], "en")
+            self.assertEqual(sess["portal_lang_code"], "de")
+
+        with patch("app.routes.routes.app_opt_get", return_value=""), \
+             patch("app.routes.routes.get_deal_userfields", return_value=[]), \
+             patch("app.routes.routes.list_contact_userfields", return_value=[]):
+            response = self.client.get("/settings?auth[lang]=de")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("SEPA Settings", body)
+        self.assertIn('data-language-mode="en"', body)
+
+    def test_auto_language_mode_follows_portal_again(self):
+        self._set_session_auth()
+        with self.client.session_transaction() as sess:
+            sess["app_lang_override"] = "en"
+            sess["app_lang"] = "en"
+            sess["portal_lang_code"] = "en"
+
+        with patch("app.routes.routes.app_opt_set") as mocked_set:
+            response = self.client.post(
+                "/set-language",
+                data={
+                    "ui_lang": "auto",
+                    "next": "/settings",
+                    "auth[lang]": "de",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        mocked_set.assert_called_with("example.bitrix24.de", "session-token", "UI_LANGUAGE_OVERRIDE", "AUTO")
+
+        with patch("app.routes.routes.app_opt_get", return_value=""), \
+             patch("app.routes.routes.get_deal_userfields", return_value=[]), \
+             patch("app.routes.routes.list_contact_userfields", return_value=[]):
+            response = self.client.get("/settings?auth[lang]=de")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("SEPA Einstellungen", body)
+        self.assertIn('data-language-mode="auto"', body)
+
+    def test_saved_language_override_is_loaded_from_bitrix_options(self):
+        self._set_session_auth()
+
+        def option_value(domain, token, key):
+            if key == "UI_LANGUAGE_OVERRIDE":
+                return "EN"
+            return ""
+
+        with patch("app.routes.routes.app_opt_get", side_effect=option_value), \
+             patch("app.routes.routes.get_deal_userfields", return_value=[]), \
+             patch("app.routes.routes.list_contact_userfields", return_value=[]):
+            response = self.client.get("/settings?auth[lang]=de")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("SEPA Settings", body)
+        self.assertIn('data-language-mode="en"', body)
+
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess["app_lang_override"], "en")
 
     def test_settings_reads_creditor_data_from_bitrix_options(self):
         self._set_session_auth()
@@ -364,7 +510,7 @@ class RouteTests(unittest.TestCase):
             {"FIELD_NAME": "UF_CRM_SEPA_IBAN", "USER_TYPE_ID": "string", "EDIT_FORM_LABEL": "SEPA IBAN"},
         ]
 
-        def ensure_side_effect(domain, token, logical_name, userfields=None):
+        def ensure_side_effect(domain, token, logical_name, userfields=None, language="de"):
             if logical_name == "CONTACT_IBAN":
                 return created_contact_fields[0], True, created_contact_fields
             return created_deal_fields[0], True, created_deal_fields
@@ -404,7 +550,7 @@ class RouteTests(unittest.TestCase):
     def test_install_redirect_preserves_auth_query_and_session(self):
         with patch("app.routes.routes.app_opt_set"):
             response = self.client.get(
-                "/install?AUTH_ID=token-install&DOMAIN=example.bitrix24.de&member_id=member-1&REFRESH_ID=refresh-1&expires=3600"
+                "/install?AUTH_ID=token-install&DOMAIN=example.bitrix24.de&member_id=member-1&REFRESH_ID=refresh-1&expires=3600&lang=en"
             )
 
         self.assertEqual(response.status_code, 302)
@@ -413,10 +559,12 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(query["auth[access_token]"][0], "token-install")
         self.assertEqual(query["auth[domain]"][0], "example.bitrix24.de")
         self.assertEqual(query["auth[member_id]"][0], "member-1")
+        self.assertEqual(query["auth[lang]"][0], "en")
 
         with self.client.session_transaction() as sess:
             self.assertEqual(sess["token"], "token-install")
             self.assertEqual(sess["refresh_token"], "refresh-1")
+            self.assertEqual(sess["app_lang"], "en")
 
     def test_settings_accepts_non_standard_creditor_data(self):
         self._set_session_auth()
@@ -481,6 +629,14 @@ class RouteTests(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertNotIn("Einstellungen gespeichert.", body)
         self.assertIn("Bitrix24 gespeichert", body)
+
+    def test_checkout_success_uses_english_copy_when_lang_is_english(self):
+        response = self.client.get("/success?app_lang=en")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Subscription activated", body)
+        self.assertIn("The Pro plan is now active.", body)
 
     def test_debug_detect_mandate_fields_falls_back_to_auth_bootstrap_when_token_is_expired(self):
         self._set_session_auth()
