@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 
 DB_PATH = Path(__file__).resolve().parent / "database.db"
+_INITIALIZED_DB_PATH: str | None = None
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=5)
     conn.row_factory = sqlite3.Row
-    return conn
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _today_str() -> str:
@@ -40,6 +49,12 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict | None:
 
 
 def _init_db():
+    global _INITIALIZED_DB_PATH
+
+    current_db_path = str(DB_PATH.resolve())
+    if _INITIALIZED_DB_PATH == current_db_path and DB_PATH.exists():
+        return
+
     with _connect() as conn:
         conn.execute(
             """
@@ -53,7 +68,14 @@ def _init_db():
             )
             """
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_users_stripe_customer_id ON users(stripe_customer_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_users_stripe_subscription_id ON users(stripe_subscription_id)"
+        )
         conn.commit()
+    _INITIALIZED_DB_PATH = current_db_path
 
 
 def _fetch_user(member_id: str) -> dict | None:

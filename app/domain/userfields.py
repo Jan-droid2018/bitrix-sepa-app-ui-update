@@ -1,4 +1,5 @@
 import unicodedata
+import time
 
 from app.i18n import normalize_language, translate
 from app.services.bitrix_helper import b24_batch, b24_call, b24_call_raw, b24_list_all, _chunk
@@ -49,12 +50,65 @@ USERFIELD_TRANSLATION_KEYS = {
     "CONTACT_IBAN": "userfield.contact_iban",
 }
 
+_USERFIELD_CACHE_TTL_SECONDS = 120
+_userfield_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+
+
+def _userfield_cache_key(domain: str, scope: str) -> tuple[str, str]:
+    return (str(domain or "").strip().lower(), scope)
+
+
+def _get_cached_userfields(domain: str, scope: str) -> list[dict] | None:
+    cache_key = _userfield_cache_key(domain, scope)
+    entry = _userfield_cache.get(cache_key)
+    if entry is None:
+        return None
+
+    expires_at, payload = entry
+    if time.time() >= expires_at:
+        _userfield_cache.pop(cache_key, None)
+        return None
+
+    return [dict(userfield) for userfield in payload]
+
+
+def _set_cached_userfields(domain: str, scope: str, payload: list[dict]):
+    _userfield_cache[_userfield_cache_key(domain, scope)] = (
+        time.time() + _USERFIELD_CACHE_TTL_SECONDS,
+        [dict(userfield) for userfield in payload],
+    )
+
+
+def clear_userfield_cache(domain: str | None = None, *, scope: str | None = None):
+    if domain is None:
+        if scope is None:
+            _userfield_cache.clear()
+            return
+
+        keys_to_remove = [
+            cache_key
+            for cache_key in _userfield_cache
+            if cache_key[1] == scope
+        ]
+        for cache_key in keys_to_remove:
+            _userfield_cache.pop(cache_key, None)
+        return
+
+    normalized_domain = str(domain or "").strip().lower()
+    scopes = (scope,) if scope else ("deal", "contact")
+    for current_scope in scopes:
+        _userfield_cache.pop((normalized_domain, current_scope), None)
+
 # =========================
 # Userfields / Deals
 # =========================
 
 
 def get_deal_userfields(domain: str, access_token: str) -> list[dict]:
+    cached = _get_cached_userfields(domain, "deal")
+    if cached is not None:
+        return cached
+
     base = b24_list_all(domain, access_token, "crm.deal.userfield.list") or []
 
     ids = [uf.get("ID") or uf.get("id") for uf in base if (uf.get("ID") or uf.get("id"))]
@@ -71,10 +125,15 @@ def get_deal_userfields(domain: str, access_token: str) -> list[dict]:
         fid = str(uf.get("ID") or uf.get("id") or "")
         full = out_map.get(fid)
         out.append(full or uf)
-    return out
+    _set_cached_userfields(domain, "deal", out)
+    return [dict(userfield) for userfield in out]
 
 
 def list_contact_userfields(domain: str, access_token: str) -> list[dict]:
+    cached = _get_cached_userfields(domain, "contact")
+    if cached is not None:
+        return cached
+
     base = b24_list_all(domain, access_token, "crm.contact.userfield.list") or []
     ids = [uf.get("ID") or uf.get("id") for uf in base if (uf.get("ID") or uf.get("id"))]
     out_map = {}
@@ -90,7 +149,8 @@ def list_contact_userfields(domain: str, access_token: str) -> list[dict]:
         fid = str(uf.get("ID") or uf.get("id") or "")
         full = out_map.get(fid)
         out.append(full or uf)
-    return out
+    _set_cached_userfields(domain, "contact", out)
+    return [dict(userfield) for userfield in out]
 
 
 def _spec_for(logical_name: str) -> dict:
@@ -167,6 +227,7 @@ def ensure_sepa_userfield(
     }
 
     b24_call(domain, access_token, spec["method"], {"fields": fields_payload})
+    clear_userfield_cache(domain, scope=spec["scope"])
 
     if spec["scope"] == "contact":
         refreshed = list_contact_userfields(domain, access_token) or []

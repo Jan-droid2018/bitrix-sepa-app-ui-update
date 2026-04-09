@@ -1,11 +1,23 @@
 import os
 import re
+import time
 
 from app.services.bitrix_helper import b24_call, b24_list_all
 
 # =========================
 # Kategorien (Pipelines)
 # =========================
+
+_CATEGORY_CACHE_TTL_SECONDS = 120
+_category_cache: dict[str, tuple[float, list[dict]]] = {}
+
+
+def clear_category_cache(domain: str | None = None):
+    if domain is None:
+        _category_cache.clear()
+        return
+
+    _category_cache.pop(str(domain or "").strip().lower(), None)
 
 
 def list_categories(domain: str, access_token: str) -> list[dict]:
@@ -14,6 +26,11 @@ def list_categories(domain: str, access_token: str) -> list[dict]:
     Optional koennen relevante Namen per ENV gefiltert werden:
     B24_CATEGORY_NAME_KEYWORDS="rechnung,rechnungen,sepa,export"
     """
+    cache_key = str(domain or "").strip().lower()
+    cached = _category_cache.get(cache_key)
+    if cached and time.time() < cached[0]:
+        return [dict(category) for category in cached[1]]
+
     cats = b24_list_all(domain, access_token, "crm.dealcategory.list") or []
 
     default_raw = None
@@ -79,7 +96,11 @@ def list_categories(domain: str, access_token: str) -> list[dict]:
             int(item["ID"]) if item["ID"].isdigit() else 99_999,
         )
     )
-    return final
+    _category_cache[cache_key] = (
+        time.time() + _CATEGORY_CACHE_TTL_SECONDS,
+        [dict(category) for category in final],
+    )
+    return [dict(category) for category in final]
 
 
 # =========================

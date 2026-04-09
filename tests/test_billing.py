@@ -6,10 +6,20 @@ from unittest.mock import Mock, patch
 
 import db
 from app import create_app
+from app.config.app_options import clear_app_option_cache
+from app.domain.categories import clear_category_cache
+from app.domain.userfields import clear_userfield_cache
+
+
+def _clear_runtime_caches():
+    clear_app_option_cache()
+    clear_category_cache()
+    clear_userfield_cache()
 
 
 class BillingDbTests(unittest.TestCase):
     def setUp(self):
+        _clear_runtime_caches()
         self.test_db_path = Path(__file__).resolve().parents[1] / f"billing_test_{uuid.uuid4().hex}.db"
         self.original_db_path = db.DB_PATH
         db.DB_PATH = self.test_db_path
@@ -62,6 +72,7 @@ class BillingDbTests(unittest.TestCase):
 
 class BillingRouteTests(unittest.TestCase):
     def setUp(self):
+        _clear_runtime_caches()
         os.environ.setdefault("BITRIX_CLIENT_ID", "test-client")
         os.environ.setdefault("BITRIX_CLIENT_SECRET", "test-secret")
 

@@ -7,7 +7,7 @@
         <link rel="preconnect" href="https://fonts.googleapis.com"/>
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
         <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
-        <link rel="stylesheet" href="{{ url_for('static', filename='bitrix24-app.css', v='20260323k') }}"/>
+        <link rel="stylesheet" href="{{ url_for('static', filename='bitrix24-app.css', v='20260409b') }}"/>
     </head>
     <body class="bitrix-app" data-app-lang="{{ app_lang }}" data-language-mode="{{ language_mode }}">
         <div class="page-shell">
@@ -119,7 +119,7 @@
                                 </select>
                             </label>
                         </div>
-                        <div class="inline-actions" style="margin-top:14px;">
+                        <div class="inline-actions spaced-top">
                             <button class="btn btn-primary" type="submit">{{ t("index.load_deals") }}</button>
                         </div>
                     </form>
@@ -144,7 +144,7 @@
 
             <section class="panel">
                 <div class="panel-body tight">
-                    <div class="inline-tools">
+                    <div class="inline-tools filter-toolbar">
                         <label class="toolbar-search">
                             <span>{{ t("index.search.label") }}</span>
                             <input class="input" id="searchBox" placeholder="{{ t('index.search.placeholder') }}"/>
@@ -174,7 +174,7 @@
                         <input type="hidden" name="page" value="{{ page }}"/>
                         <input type="hidden" name="page_size" value="{{ page_size }}"/>
 
-                        <div class="grid" style="margin-bottom:14px;">
+                        <div class="grid spaced-bottom">
                             <label class="field-label">{{ t("index.field.collection_date") }}
                                 <input class="input" type="date" name="exec_date" value="{{ today }}"/>
                             </label>
@@ -194,11 +194,11 @@
                             </label>
                         </div>
 
-                        <div class="inline-actions" style="margin-bottom:14px;">
+                        <div class="inline-actions spaced-bottom">
                             <button class="btn btn-primary" type="submit" {% if not deals %}disabled{% endif %}>{{ t("index.generate_xml") }}</button>
                         </div>
 
-                        <div class="table-wrap">
+                        <div class="table-wrap mobile-cards">
                             <table id="dealTable">
                                 <thead>
                                     <tr>
@@ -217,15 +217,15 @@
                                     {% for d in deals %}
                                         {% set dm = debtor_map.get(d.ID|string) if debtor_map else None %}
                                         <tr data-amount="{{ d.OPPORTUNITY|float }}" data-currency="{{ d.CURRENCY_ID|e }}">
-                                            <td><input type="checkbox" name="deal_id" value="{{ d.ID }}"/></td>
-                                            <td>{{ d.ID }}</td>
-                                            <td>{{ d.TITLE }}</td>
-                                            <td class="num">{{ '%.2f'|format(d.OPPORTUNITY|float) }}</td>
-                                            <td>{{ d.CURRENCY_ID }}</td>
-                                            <td>{{ (dm and dm.contact_name) or (dm and dm.company_title) or (debtor_name_field and d.get(debtor_name_field)) or d.TITLE }}</td>
-                                            <td>{{ (dm and dm.iban) or '' }}</td>
-                                            <td>{{ mandate_id_field and d.get(mandate_id_field) or '' }}</td>
-                                            <td>
+                                            <td data-label=""><input type="checkbox" name="deal_id" value="{{ d.ID }}"/></td>
+                                            <td data-label="{{ t('index.table.id') }}">{{ d.ID }}</td>
+                                            <td data-label="{{ t('index.table.title') }}">{{ d.TITLE }}</td>
+                                            <td class="num" data-label="{{ t('index.table.amount') }}">{{ '%.2f'|format(d.OPPORTUNITY|float) }}</td>
+                                            <td data-label="{{ t('index.table.currency') }}">{{ d.CURRENCY_ID }}</td>
+                                            <td data-label="{{ t('index.table.debtor_name') }}">{{ (dm and dm.contact_name) or (dm and dm.company_title) or (debtor_name_field and d.get(debtor_name_field)) or d.TITLE }}</td>
+                                            <td data-label="{{ t('index.table.debtor_iban') }}">{{ (dm and dm.iban) or '' }}</td>
+                                            <td data-label="{{ t('index.table.mandate_id') }}">{{ mandate_id_field and d.get(mandate_id_field) or '' }}</td>
+                                            <td data-label="{{ t('common.status') }}">
                                                 {% if not mandate_id_field %}
                                                     <span class="pill">{{ t("index.status.mandate_field_missing") }}</span>
                                                 {% elif not (mandate_id_field and d.get(mandate_id_field)) %}
@@ -286,12 +286,19 @@
         </div>
 
         <script src="https://api.bitrix24.com/api/v1/"></script>
-        <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260408a') }}"></script>
+        <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260409d') }}"></script>
         <script>
         (function(){
             const table = document.getElementById("dealTable");
             const tbody = table ? table.querySelector("tbody") : null;
             const rows = tbody ? Array.from(tbody.querySelectorAll("tr")) : [];
+            const rowEntries = rows.map((row) => ({
+                row,
+                checkbox: row.querySelector('input[type="checkbox"][name="deal_id"]'),
+                searchableText: row.textContent.toLowerCase(),
+                currency: (row.getAttribute("data-currency") || "").toUpperCase(),
+                amount: parseFloat(row.getAttribute("data-amount") || "0") || 0,
+            }));
             const searchBox = document.getElementById("searchBox");
             const fltEur = document.getElementById("fltEur");
             const fltPos = document.getElementById("fltPos");
@@ -314,63 +321,86 @@
                     .replace("{total}", String(total));
             }
 
-            function matchesFilters(tr){
-                const q = (searchBox.value || "").toLowerCase().trim();
-                const txt = tr.textContent.toLowerCase();
-                if(q && !txt.includes(q)) return false;
+            function currentFilterState() {
+                return {
+                    query: (searchBox.value || "").toLowerCase().trim(),
+                    onlyEur: fltEur.checked,
+                    positiveOnly: fltPos.checked,
+                };
+            }
 
-                const currency = (tr.getAttribute("data-currency") || "").toUpperCase();
-                const amount = parseFloat(tr.getAttribute("data-amount") || "0") || 0;
-
-                if(fltEur.checked && currency !== "EUR") return false;
-                if(fltPos.checked && !(amount > 0)) return false;
+            function matchesFilters(entry, state){
+                if(state.query && !entry.searchableText.includes(state.query)) return false;
+                if(state.onlyEur && entry.currency !== "EUR") return false;
+                if(state.positiveOnly && !(entry.amount > 0)) return false;
                 return true;
             }
 
-            function visibleRows(){
-                return rows.filter(matchesFilters);
-            }
+            function syncCheckState(visibleEntries){
+                const checked = visibleEntries.filter((entry) => entry.checkbox && entry.checkbox.checked);
 
-            function syncCheckState(){
-                const visible = visibleRows();
-                const checked = visible.filter((row) => {
-                    const cb = row.querySelector('input[type="checkbox"][name="deal_id"]');
-                    return cb && cb.checked;
-                });
-
-                checkAll.checked = visible.length > 0 && checked.length === visible.length;
-                checkAll.indeterminate = checked.length > 0 && checked.length < visible.length;
+                checkAll.checked = visibleEntries.length > 0 && checked.length === visibleEntries.length;
+                checkAll.indeterminate = checked.length > 0 && checked.length < visibleEntries.length;
             }
 
             function apply(){
-                const visible = visibleRows();
-                rows.forEach((row) => {
-                    row.style.display = matchesFilters(row) ? "" : "none";
+                const filterState = currentFilterState();
+                const visibleEntries = [];
+
+                rowEntries.forEach((entry) => {
+                    const isVisible = matchesFilters(entry, filterState);
+                    entry.row.hidden = !isVisible;
+                    if (isVisible) {
+                        visibleEntries.push(entry);
+                    }
                 });
-                rowInfo.textContent = formatRowInfo(visible.length, rows.length);
-                checkAll.disabled = visible.length === 0;
-                syncCheckState();
+
+                rowInfo.textContent = formatRowInfo(visibleEntries.length, rowEntries.length);
+                checkAll.disabled = visibleEntries.length === 0;
+                syncCheckState(visibleEntries);
+            }
+
+            let checkoutFeedbackTimer = null;
+
+            function hideCheckoutError() {
+                if (!checkoutFeedback) return;
+                if (checkoutFeedbackTimer) {
+                    window.clearTimeout(checkoutFeedbackTimer);
+                    checkoutFeedbackTimer = null;
+                }
+                checkoutFeedback.hidden = true;
+                checkoutFeedback.textContent = "";
             }
 
             function showCheckoutError(message){
-                if (!checkoutFeedback) return;
-                checkoutFeedback.hidden = false;
+                if (!checkoutFeedback || !message) {
+                    hideCheckoutError();
+                    return;
+                }
+
+                if (checkoutFeedbackTimer) {
+                    window.clearTimeout(checkoutFeedbackTimer);
+                }
+
                 checkoutFeedback.textContent = message;
+                checkoutFeedback.hidden = false;
+                checkoutFeedbackTimer = window.setTimeout(hideCheckoutError, 8000);
             }
 
             searchBox.addEventListener("input", apply);
             fltEur.addEventListener("change", apply);
             fltPos.addEventListener("change", apply);
             checkAll.addEventListener("change", () => {
-                visibleRows().forEach((row) => {
-                    const cb = row.querySelector('input[type="checkbox"][name="deal_id"]');
-                    if(cb) cb.checked = checkAll.checked;
+                const filterState = currentFilterState();
+                const visibleEntries = rowEntries.filter((entry) => matchesFilters(entry, filterState));
+
+                visibleEntries.forEach((entry) => {
+                    if(entry.checkbox) entry.checkbox.checked = checkAll.checked;
                 });
-                syncCheckState();
+                syncCheckState(visibleEntries);
             });
-            rows.forEach((row) => {
-                const cb = row.querySelector('input[type="checkbox"][name="deal_id"]');
-                if(cb) cb.addEventListener("change", syncCheckState);
+            rowEntries.forEach((entry) => {
+                if(entry.checkbox) entry.checkbox.addEventListener("change", apply);
             });
 
             if (upgradeButton) {
@@ -378,10 +408,7 @@
                     const previousText = upgradeButton.textContent;
                     const body = new URLSearchParams();
 
-                    if (checkoutFeedback) {
-                        checkoutFeedback.hidden = true;
-                        checkoutFeedback.textContent = "";
-                    }
+                    hideCheckoutError();
 
                     upgradeButton.disabled = true;
                     upgradeButton.textContent = checkoutStartingText;

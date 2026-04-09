@@ -11,13 +11,29 @@ os.environ.setdefault("BITRIX_CLIENT_ID", "test-client")
 os.environ.setdefault("BITRIX_CLIENT_SECRET", "test-secret")
 
 from app import create_app
-from app.config.app_options import app_opt_get, app_opt_set
-from app.domain.userfields import detect_iban_userfield, detect_logical_userfield, ensure_sepa_userfield, list_deals_page
+from app.config.app_options import app_opt_get, app_opt_get_many, app_opt_set, clear_app_option_cache
+from app.domain.categories import clear_category_cache
+from app.domain.userfields import (
+    clear_userfield_cache,
+    detect_iban_userfield,
+    detect_logical_userfield,
+    ensure_sepa_userfield,
+    list_deals_page,
+)
 from app.services.bitrix_helper import b24_call_raw
 from app.services.export import PAIN_008_NS, build_pain008_xml
 
 
+def _clear_runtime_caches():
+    clear_app_option_cache()
+    clear_category_cache()
+    clear_userfield_cache()
+
+
 class AppOptionsTests(unittest.TestCase):
+    def setUp(self):
+        _clear_runtime_caches()
+
     def test_app_opt_set_uses_options_payload(self):
         with patch("app.config.app_options.b24_call") as mocked_call:
             app_opt_set("example.bitrix24.de", "token-1", "CREDITOR_NAME", "Portal Creditor")
@@ -39,6 +55,23 @@ class AppOptionsTests(unittest.TestCase):
             result = app_opt_get("example.bitrix24.de", "token-1", "CREDITOR_NAME")
 
         self.assertEqual(result, "Portal Creditor")
+
+    def test_app_opt_get_many_batches_requested_options(self):
+        batch_payload = {
+            "CREDITOR_NAME": {"SEPA_SDD_CREDITOR_NAME": "Portal Creditor"},
+            "CREDITOR_IBAN": {"SEPA_SDD_CREDITOR_IBAN": "DE123"},
+        }
+
+        with patch("app.config.app_options.b24_batch", return_value=batch_payload) as mocked_batch:
+            result = app_opt_get_many(
+                "example.bitrix24.de",
+                "token-1",
+                ("CREDITOR_NAME", "CREDITOR_IBAN"),
+            )
+
+        self.assertEqual(result["CREDITOR_NAME"], "Portal Creditor")
+        self.assertEqual(result["CREDITOR_IBAN"], "DE123")
+        mocked_batch.assert_called_once()
 
 
 class ExportTests(unittest.TestCase):
@@ -186,6 +219,7 @@ class UserfieldDetectionTests(unittest.TestCase):
 
 class BitrixHelperTests(unittest.TestCase):
     def setUp(self):
+        _clear_runtime_caches()
         self.app = create_app()
         self.ctx = self.app.test_request_context("/")
         self.ctx.push()
@@ -222,6 +256,7 @@ class BitrixHelperTests(unittest.TestCase):
 
 class RouteTests(unittest.TestCase):
     def setUp(self):
+        _clear_runtime_caches()
         self.app = create_app()
         self.client = self.app.test_client()
         self.app_context = self.app.app_context()
@@ -375,6 +410,51 @@ class RouteTests(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertIn("SEPA Einstellungen", body)
         self.assertIn('data-language-mode="auto"', body)
+
+    def test_export_error_uses_index_target_for_language_switch(self):
+        self._set_session_auth()
+
+        with patch("app.routes.routes._load_categories", return_value=[{"ID": "5", "NAME": "Sales"}]), \
+             patch("app.routes.routes._populate_index_listing"), \
+             patch("app.routes.routes.create_user_if_not_exists"), \
+             patch("app.routes.routes.get_user", return_value={"plan": "free", "exports_used": 1}), \
+             patch("app.routes.routes.can_export", return_value=False):
+            response = self.client.post(
+                "/export",
+                data={
+                    "category_id": "5",
+                    "stage_id": "C5:NEW",
+                    "page": "2",
+                    "page_size": "25",
+                    "lcl_instr": "CORE",
+                    "seq": "OOFF",
+                    "deal_id": "123",
+                },
+            )
+
+        self.assertEqual(response.status_code, 403)
+        body = response.get_data(as_text=True)
+        self.assertIn(
+            'name="next" value="/?category_id=5&amp;stage_id=C5%3ANEW&amp;page=2&amp;page_size=25&amp;lcl_instr=CORE&amp;seq=OOFF"',
+            body,
+        )
+
+    def test_set_language_rejects_post_only_next_target(self):
+        self._set_session_auth()
+
+        with patch("app.routes.routes.app_opt_set") as mocked_set:
+            response = self.client.post(
+                "/set-language",
+                data={
+                    "ui_lang": "en",
+                    "next": "/export",
+                    "auth[lang]": "de",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(urlparse(response.headers["Location"]).path, "/settings")
+        mocked_set.assert_called_with("example.bitrix24.de", "session-token", "UI_LANGUAGE_OVERRIDE", "EN")
 
     def test_saved_language_override_is_loaded_from_bitrix_options(self):
         self._set_session_auth()

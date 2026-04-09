@@ -3,15 +3,18 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
-from flask import Blueprint, jsonify, redirect, render_template, render_template_string, request, send_from_directory, session
+from flask import Blueprint, current_app, jsonify, redirect, render_template, render_template_string, request, send_from_directory, session
+from werkzeug.exceptions import MethodNotAllowed, NotFound
+from werkzeug.routing import RequestRedirect
 
 from app.config.app_options import app_opt_get, app_opt_set
 from app.domain.categories import _parse_category_id, list_categories
 from app.domain.fields import resolve_field_codes, scan_field_codes
 from app.domain.userfields import (
     SEPA_USERFIELD_SPECS,
+    clear_userfield_cache,
     ensure_sepa_userfield,
     find_userfield_by_spec,
     get_sepa_userfield_label,
@@ -357,20 +360,58 @@ def _with_auth_query(path: str, domain: str | None, token: str | None, member_id
     return f"{path}?{urlencode(params)}" if params else path
 
 
-def _current_path_with_query() -> str:
+def _path_with_filtered_query(path: str, args) -> str:
     query_items = [
         (key, value)
-        for key, value in request.args.items(multi=True)
+        for key, value in args.items(multi=True)
         if key not in {"app_lang", "ui_lang"}
     ]
     if not query_items:
-        return request.path
-    return f"{request.path}?{urlencode(query_items)}"
+        return path
+    return f"{path}?{urlencode(query_items)}"
+
+
+def _index_path_from_request_values() -> str:
+    query_items = []
+    for key in ("category_id", "stage_id", "page", "page_size", "lcl_instr", "seq"):
+        value = request.values.get(key)
+        if value not in (None, ""):
+            query_items.append((key, value))
+    if not query_items:
+        return "/"
+    return f"/?{urlencode(query_items)}"
+
+
+def _path_allows_method(target: str, method: str = "GET") -> bool:
+    path = urlsplit(target).path or "/"
+    adapter = current_app.url_map.bind_to_environ(request.environ)
+    try:
+        adapter.match(path, method=method)
+        return True
+    except RequestRedirect:
+        return True
+    except (MethodNotAllowed, NotFound):
+        return False
+
+
+def _current_path_with_query() -> str:
+    if request.method == "GET":
+        return _path_with_filtered_query(request.path, request.args)
+
+    if request.path in {"/", "/export"}:
+        return _index_path_from_request_values()
+
+    target = _path_with_filtered_query(request.path, request.args)
+    if _path_allows_method(target, "GET"):
+        return target
+    return "/settings"
 
 
 def _safe_next_path(value: str | None, default: str = "/settings") -> str:
     target = str(value or "").strip()
     if not target or not target.startswith("/") or target.startswith("//"):
+        return default
+    if not _path_allows_method(target, "GET"):
         return default
     return target
 
@@ -1432,6 +1473,7 @@ def index():
 
     if request.args.get("refresh") in ("1", "true", "yes"):
         try:
+            clear_userfield_cache(domain)
             resolve_field_codes.cache_clear()
             context["info_messages"].append("Feld-Zuordnungen wurden neu geladen.")
         except Exception:
@@ -2054,4 +2096,8 @@ def uninstall():
 
 @main_bp.get("/assets/<path:filename>")
 def asset_file(filename: str):
-    return send_from_directory(str(ASSETS_DIR), filename)
+    return send_from_directory(
+        str(ASSETS_DIR),
+        filename,
+        max_age=current_app.get_send_file_max_age(filename),
+    )

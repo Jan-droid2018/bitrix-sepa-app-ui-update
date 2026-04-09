@@ -19,6 +19,7 @@ def create_app():
         SESSION_COOKIE_SAMESITE="None" if is_prod else "Lax",
         SESSION_COOKIE_SECURE=is_prod,
         TEMPLATES_AUTO_RELOAD=not is_prod,
+        SEND_FILE_MAX_AGE_DEFAULT=31536000 if is_prod else 0,
     )
     app.register_blueprint(main_bp)
     return app

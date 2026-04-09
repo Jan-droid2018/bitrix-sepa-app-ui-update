@@ -7,7 +7,7 @@
         <link rel="preconnect" href="https://fonts.googleapis.com"/>
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
         <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
-        <link rel="stylesheet" href="{{ url_for('static', filename='bitrix24-app.css', v='20260323k') }}"/>
+        <link rel="stylesheet" href="{{ url_for('static', filename='bitrix24-app.css', v='20260409b') }}"/>
     </head>
     <body class="bitrix-app" data-app-lang="{{ app_lang }}" data-language-mode="{{ language_mode }}">
         <div class="page-shell compact-shell">
@@ -200,7 +200,7 @@
         </div>
 
         <script src="https://api.bitrix24.com/api/v1/"></script>
-        <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260408a') }}"></script>
+        <script src="{{ url_for('static', filename='bitrix24-embed.js', v='20260409d') }}"></script>
         <script>
             (function () {
                 var form = document.getElementById("settings-form");
@@ -221,13 +221,35 @@
                     return;
                 }
 
-                function showCheckoutError(message) {
+                var checkoutFeedbackTimer = null;
+
+                function hideCheckoutError() {
                     if (!checkoutFeedback) {
                         return;
                     }
 
-                    checkoutFeedback.hidden = false;
+                    if (checkoutFeedbackTimer) {
+                        window.clearTimeout(checkoutFeedbackTimer);
+                        checkoutFeedbackTimer = null;
+                    }
+
+                    checkoutFeedback.hidden = true;
+                    checkoutFeedback.textContent = "";
+                }
+
+                function showCheckoutError(message) {
+                    if (!checkoutFeedback || !message) {
+                        hideCheckoutError();
+                        return;
+                    }
+
+                    if (checkoutFeedbackTimer) {
+                        window.clearTimeout(checkoutFeedbackTimer);
+                    }
+
                     checkoutFeedback.textContent = message;
+                    checkoutFeedback.hidden = false;
+                    checkoutFeedbackTimer = window.setTimeout(hideCheckoutError, 8000);
                 }
 
                 form.addEventListener("submit", function (event) {
@@ -254,10 +276,7 @@
                         var previousText = upgradeButton.textContent;
                         var body = new URLSearchParams();
 
-                        if (checkoutFeedback) {
-                            checkoutFeedback.hidden = true;
-                            checkoutFeedback.textContent = "";
-                        }
+                        hideCheckoutError();
 
                         upgradeButton.disabled = true;
                         upgradeButton.textContent = checkoutStartingText;

@@ -2,7 +2,7 @@ import time
 
 import requests
 
-from app.config.app_options import app_opt_get, app_opt_set
+from app.config.app_options import app_opt_get_many, app_opt_set
 from app.config.oauth import get_oauth_credentials
 
 BITRIX_OAUTH_URL = "https://oauth.bitrix.info/oauth/token/"
@@ -48,11 +48,16 @@ def get_valid_access_token(domain: str, bootstrap_token: str) -> str:
     unveraendert zurueckgegeben, statt rekursiv zu scheitern.
     """
 
-    access = app_opt_get(domain, bootstrap_token, "ACCESS_TOKEN") or bootstrap_token
-    refresh = app_opt_get(domain, bootstrap_token, "REFRESH_TOKEN")
+    option_values = app_opt_get_many(
+        domain,
+        bootstrap_token,
+        ("ACCESS_TOKEN", "REFRESH_TOKEN", "EXPIRES_AT"),
+    )
+    access = option_values.get("ACCESS_TOKEN") or bootstrap_token
+    refresh = option_values.get("REFRESH_TOKEN")
 
     try:
-        expires_at = int(app_opt_get(domain, bootstrap_token, "EXPIRES_AT") or 0)
+        expires_at = int(option_values.get("EXPIRES_AT") or 0)
     except Exception:
         expires_at = 0
 
